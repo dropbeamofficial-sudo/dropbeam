@@ -16,3 +16,5 @@ services:
         value: "15"
       - key: UPLOADS_DIR
         value: /tmp/uploads
+      - key: ADMIN_TOKEN
+        value: "727218"

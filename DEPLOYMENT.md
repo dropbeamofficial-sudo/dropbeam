@@ -30,3 +30,22 @@ Vercel deployment steps (frontend)
 7) Troubleshooting
    - If `_env.js` missing: ensure `npm run build` runs and `BACKEND_URL` env var is set in Vercel.
    - If CORS errors: set backend `CLIENT_URL` to the Vercel origin and redeploy backend.
+
+   Render auto-deploy via `render.yaml` (recommended)
+   -----------------------------------------------
+   1. The repository now includes `render.yaml` which defines a `dropbeam-backend` web
+      service. This file allows Render to automatically create and deploy the backend
+      when you connect your GitHub repo.
+
+   2. Steps on Render:
+      - Create an account and go to New → Import from GitHub.
+      - Choose the `dropbeam` repository and Render will detect `render.yaml`.
+      - Review service settings and click "Create Web Service". Render will build
+        and deploy automatically on pushes to `main`.
+
+   3. The manifest sets these env vars by default (you can change them in the Render dashboard):
+      - `CLIENT_URL` → should be your Vercel frontend URL
+      - `NODE_ENV=production`, `EXPIRY_MINUTES=15`, `UPLOADS_DIR=/tmp/uploads`
+
+   4. After Render provides a public HTTPS URL, set Vercel's `BACKEND_URL` to that
+      URL and redeploy the frontend (Vercel → Project → Redeploy).

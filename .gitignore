@@ -1,0 +1,17 @@
+node_modules/
+uploads/
+openJdk-25/
+.env
+.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+dist/
+build/
+*.log
+._env.js
+.vscode/
+.idea/
+.cache/
+/.DS_Store

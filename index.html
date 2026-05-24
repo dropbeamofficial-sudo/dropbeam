@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DropBeam — Instant File Transfer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- NAV -->
+  <nav class="nav">
+    <div class="nav-brand">
+      <span class="brand-icon">◈</span>
+      <span class="brand-name">DropBeam</span>
+    </div>
+    <div class="nav-links">
+      <a href="#send">Send</a>
+      <a href="#receive">Receive</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero" id="home">
+    <div class="hero-bg">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="grid-overlay"></div>
+    </div>
+    <div class="hero-content">
+      <div class="hero-badge">⚡ No sign-up required</div>
+      <h1 class="hero-title">Send Files<br /><span class="gradient-text">Instantly.</span></h1>
+      <p class="hero-sub">Share any file across devices in seconds using a 6-digit code or QR scan. No accounts. No
+        cloud storage. Just transfer.</p>
+      <div class="hero-actions">
+        <a href="#send" class="btn btn-primary">Send a File →</a>
+        <a href="#receive" class="btn btn-ghost">Receive a File</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><span class="stat-num">2GB</span><span class="stat-label">Max file size</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat"><span class="stat-num">15min</span><span class="stat-label">Auto-delete</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat"><span class="stat-num">256-bit</span><span class="stat-label">Encrypted</span></div>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="floating-card card-1">
+        <div class="fc-icon">📄</div>
+        <div class="fc-info"><span>report_q4.pdf</span><small>2.4 MB</small></div>
+        <div class="fc-status sent">Sent</div>
+      </div>
+      <div class="floating-card card-2">
+        <div class="fc-icon">🎵</div>
+        <div class="fc-info"><span>track_01.mp3</span><small>8.1 MB</small></div>
+        <div class="fc-status recv">Received</div>
+      </div>
+      <div class="floating-card card-3">
+        <div class="fc-icon">🖼</div>
+        <div class="fc-info"><span>photo_raw.png</span><small>14 MB</small></div>
+        <div class="fc-status sent">Sent</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEND SECTION -->
+  <section class="section" id="send">
+    <div class="container">
+      <div class="section-header">
+        <h2>Send a File</h2>
+        <p>Drop your file below, get a code. That's it.</p>
+      </div>
+
+      <div class="send-grid">
+        <!-- Upload Card -->
+        <div class="card upload-card" id="upload-card">
+          <div class="drop-zone" id="drop-zone">
+            <div class="drop-zone-inner" id="drop-zone-inner">
+              <div class="drop-icon">
+                <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M24 8L24 32M24 8L16 16M24 8L32 16" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M8 36H40" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                  <path d="M8 36C8 38.2091 9.79086 40 12 40H36C38.2091 40 40 38.2091 40 36" stroke="currentColor"
+                    stroke-width="2.5" stroke-linecap="round" />
+                </svg>
+              </div>
+              <p class="drop-text">Drag & drop files here</p>
+              <p class="drop-sub">or</p>
+              <label class="btn btn-outline" for="file-input">Browse Files</label>
+              <input type="file" id="file-input" multiple hidden />
+              <p class="drop-limit">Max 2 GB per file · Any file type</p>
+            </div>
+          </div>
+
+          <!-- File Preview List -->
+          <div class="file-list" id="file-list" style="display:none;">
+            <div class="file-list-header">
+              <span>Selected Files</span>
+              <button class="clear-btn" id="clear-files">✕ Clear</button>
+            </div>
+            <div id="file-items"></div>
+            <div class="upload-actions">
+              <button class="btn btn-primary full-width" id="upload-btn">
+                <span class="btn-text">Generate Transfer Code</span>
+                <span class="btn-loader" style="display:none">⟳ Uploading…</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Code + QR Card -->
+        <div class="card code-card" id="code-card" style="display:none;">
+          <div class="code-header">
+            <div class="code-badge">Transfer Ready</div>
+            <p class="code-sub">Share this code or QR to receive the file</p>
+          </div>
+
+          <div class="code-display" id="code-display">
+            <span class="code-digit" id="d0">-</span>
+            <span class="code-digit" id="d1">-</span>
+            <span class="code-digit" id="d2">-</span>
+            <span class="code-sep">·</span>
+            <span class="code-digit" id="d3">-</span>
+            <span class="code-digit" id="d4">-</span>
+            <span class="code-digit" id="d5">-</span>
+          </div>
+
+          <button class="btn btn-outline copy-btn" id="copy-code-btn">
+            <span id="copy-label">📋 Copy Code</span>
+          </button>
+
+          <div class="divider"><span>or scan QR</span></div>
+
+          <div class="qr-container" id="qr-container">
+            <canvas id="qr-canvas"></canvas>
+          </div>
+
+          <div class="expiry-timer">
+            <span class="timer-icon">⏱</span>
+            <span>Expires in <strong id="expiry-countdown">15:00</strong></span>
+          </div>
+
+          <button class="btn btn-ghost full-width" id="new-transfer-btn">+ New Transfer</button>
+        </div>
+
+        <!-- Progress Card -->
+        <div class="card progress-card" id="progress-card" style="display:none;">
+          <div class="progress-header">
+            <span class="progress-label" id="progress-label">Uploading…</span>
+            <span class="progress-pct" id="progress-pct">0%</span>
+          </div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <div class="progress-meta">
+            <span id="progress-speed">-- KB/s</span>
+            <span id="progress-size">-- / --</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RECEIVE SECTION -->
+  <section class="section section-alt" id="receive">
+    <div class="container">
+      <div class="section-header">
+        <h2>Receive a File</h2>
+        <p>Enter the 6-digit code from the sender.</p>
+      </div>
+
+      <div class="receive-grid">
+        <div class="card receive-card">
+          <div class="receive-inputs">
+            <div class="code-input-group" id="code-input-group">
+              <input class="code-input" type="text" maxlength="1" id="ci0" inputmode="numeric" />
+              <input class="code-input" type="text" maxlength="1" id="ci1" inputmode="numeric" />
+              <input class="code-input" type="text" maxlength="1" id="ci2" inputmode="numeric" />
+              <span class="code-sep-input">·</span>
+              <input class="code-input" type="text" maxlength="1" id="ci3" inputmode="numeric" />
+              <input class="code-input" type="text" maxlength="1" id="ci4" inputmode="numeric" />
+              <input class="code-input" type="text" maxlength="1" id="ci5" inputmode="numeric" />
+            </div>
+            <p class="or-label">— or —</p>
+            <button class="btn btn-outline full-width" id="scan-qr-btn">📷 Scan QR Code</button>
+          </div>
+
+          <button class="btn btn-primary full-width" id="receive-btn">Download File ↓</button>
+
+          <!-- Receive Progress -->
+          <div id="receive-progress" style="display:none;">
+            <div class="progress-header">
+              <span class="progress-label" id="recv-label">Downloading…</span>
+              <span class="progress-pct" id="recv-pct">0%</span>
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar" id="recv-bar"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="recv-speed">-- KB/s</span>
+              <span id="recv-size">-- / --</span>
+            </div>
+          </div>
+
+          <!-- File info display -->
+          <div id="recv-file-info" style="display:none;" class="recv-file-preview">
+            <div class="rfp-icon" id="rfp-icon">📄</div>
+            <div class="rfp-details">
+              <span id="rfp-name">filename.ext</span>
+              <small id="rfp-size">0 KB</small>
+            </div>
+            <a class="btn btn-primary" id="rfp-download-btn" href="#" download>↓ Save</a>
+          </div>
+        </div>
+
+        <!-- QR Scanner Overlay -->
+        <div class="card qr-scanner-card" id="qr-scanner-card" style="display:none;">
+          <div class="scanner-header">
+            <span>Scan QR Code</span>
+            <button class="close-scanner" id="close-scanner">✕</button>
+          </div>
+          <div class="scanner-viewport">
+            <video id="qr-video" autoplay playsinline muted></video>
+            <div class="scanner-overlay">
+              <div class="scanner-frame"></div>
+            </div>
+          </div>
+          <p class="scanner-hint">Point camera at the sender's QR code</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="section" id="how">
+    <div class="container">
+      <div class="section-header">
+        <h2>How It Works</h2>
+        <p>Three steps. Zero friction.</p>
+      </div>
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-num">01</div>
+          <h3>Upload</h3>
+          <p>Drop your file into the upload zone. Files are temporarily stored with end-to-end encryption.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">02</div>
+          <h3>Share Code</h3>
+          <p>A unique 6-digit code and QR code are generated. Share either with your recipient.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">03</div>
+          <h3>Receive</h3>
+          <p>The recipient enters the code or scans the QR. The file downloads directly to their device.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="brand-icon">◈</span> DropBeam
+      </div>
+      <p class="footer-note">Files auto-deleted after 15 minutes. No data retained.</p>
+      <p class="footer-copy"> © 2025 DropBeam</p>
+    </div>
+  </footer>
+
+  <!-- QR library (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Runtime backend URL (generated at build time by scripts/generate-env.js) -->
+  <script src="/_env.js"></script>
+  <script src="script.js"></script>
+</body>
+
+</html>

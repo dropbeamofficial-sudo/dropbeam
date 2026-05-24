@@ -215,6 +215,10 @@ async function handleUpload() {
       const res = JSON.parse(xhr.responseText);
       if (res.success) {
         showCode(res.code);
+        // clear selected files so next upload starts fresh
+        selectedFiles = [];
+        fileInput.value = '';
+        renderFileList();
         progressBar.style.width = '100%';
         progressPct.textContent = '100%';
         progressLabel.textContent = 'Upload Complete ✓';
@@ -361,6 +365,15 @@ function resetSendUI() {
   clearInterval(expiryInterval);
 }
 
+function resetReceiveUI() {
+  receiveProgress.style.display = 'none';
+  recvFileInfo.style.display = 'none';
+  recvBar.style.width = '0%'; recvPct.textContent = '0%';
+  recvLabel.textContent = '';
+  recvSpeed.textContent = '-- KB/s'; recvSize.textContent = '-- / --';
+  codeInputs.forEach(i => { i.value = ''; i.classList.remove('filled'); });
+}
+
 // =============================================
 // CODE INPUT — RECEIVE
 // =============================================
@@ -460,6 +473,8 @@ async function handleReceive() {
         const a = document.createElement('a');
         a.href = url; a.download = meta.filename;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        // Reset receive UI shortly after download starts so the page returns to neutral state
+        setTimeout(() => resetReceiveUI(), 800);
       } else {
         toast('Download failed', 'error');
         receiveProgress.style.display = 'none';

@@ -2,6 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto'); // built-in Node.js, no install needed
 
+// Configurable uploads directory (use platform temp dir or env override)
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY; // 32 chars
 const IV_LENGTH = 16;
 

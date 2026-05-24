@@ -20,6 +20,7 @@ let expiryInterval = null;
 let expirySeconds = 900; // 15 min
 let qrCodeInstance = null;
 let qrStream = null;  // camera stream
+let scanning = false;
 
 // =============================================
 // DOM REFS
@@ -308,20 +309,18 @@ function generateQR(code) {
       correctLevel: QRCode.CorrectLevel.M
     });
     const img = qrDiv.querySelector('img');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 200; canvas.height = 200;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (img) {
-      img.onload = () => {
-        const ctx = canvas.getContext('2d');
-        canvas.width = 200; canvas.height = 200;
-        ctx.drawImage(img, 0, 0, 200, 200);
-      };
+      // Draw immediately if already loaded, otherwise draw onload
+      const drawImg = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (img.complete && img.naturalWidth !== 0) drawImg();
+      else img.onload = drawImg;
     } else {
-      // Fallback: render from canvas in qrDiv
+      // Fallback: render from canvas produced by QRCode.js
       const c = qrDiv.querySelector('canvas');
-      if (c) {
-        canvas.width = 200; canvas.height = 200;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(c, 0, 0, 200, 200);
-      }
+      if (c) ctx.drawImage(c, 0, 0, canvas.width, canvas.height);
     }
   } else {
     // Fallback: simple text-based indicator
@@ -492,7 +491,10 @@ async function openScanner() {
     qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     qrVideo.srcObject = qrStream;
     qrScannerCard.style.display = 'flex';
+    // Some browsers require calling play() for the video element to start producing frames
+    try { await qrVideo.play(); } catch (_) { /* ignore play errors */ }
     toast('Point camera at a DropBeam QR code', 'info');
+    scanning = true;
     scanFrame();
   } catch (err) {
     toast('Camera access denied', 'error');
@@ -500,18 +502,26 @@ async function openScanner() {
 }
 
 function stopScanner() {
+  scanning = false;
   if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
   qrScannerCard.style.display = 'none';
 }
 
 function scanFrame() {
-  if (!qrStream) return;
+  if (!scanning) return;
+  // Create an offscreen canvas and downscale the frame for faster decoding
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (qrVideo.readyState === qrVideo.HAVE_ENOUGH_DATA) {
-    canvas.width = qrVideo.videoWidth;
-    canvas.height = qrVideo.videoHeight;
-    ctx.drawImage(qrVideo, 0, 0);
+    const vw = qrVideo.videoWidth || qrVideo.clientWidth;
+    const vh = qrVideo.videoHeight || qrVideo.clientHeight;
+    if (!vw || !vh) { requestAnimationFrame(scanFrame); return; }
+    // Limit decoding resolution to improve performance
+    const maxDim = 800;
+    const scale = Math.min(1, maxDim / Math.max(vw, vh));
+    canvas.width = Math.max(100, Math.floor(vw * scale));
+    canvas.height = Math.max(100, Math.floor(vh * scale));
+    ctx.drawImage(qrVideo, 0, 0, canvas.width, canvas.height);
     try {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       // Use jsQR if available (loaded dynamically)
@@ -522,9 +532,12 @@ function scanFrame() {
           return;
         }
       }
-    } catch (_) { }
+    } catch (err) {
+      console.debug('[QR scan error]', err && err.message);
+    }
   }
-  requestAnimationFrame(scanFrame);
+  // small delay to avoid CPU spike on some devices
+  setTimeout(() => { if (scanning) requestAnimationFrame(scanFrame); }, 50);
 }
 
 function handleQrResult(url) {
@@ -536,7 +549,11 @@ function handleQrResult(url) {
       code.split('').forEach((ch, i) => {
         codeInputs[i].value = ch; codeInputs[i].classList.add('filled');
       });
-      toast('QR scanned! Click Download to receive.', 'success');
+      toast('QR scanned! Starting download…', 'success');
+      // Auto-start the receive flow so scanning leads directly to downloading
+      setTimeout(() => {
+        try { handleReceive(); } catch (_) { document.getElementById('receive').scrollIntoView({ behavior: 'smooth' }); }
+      }, 300);
     } else {
       toast('QR code not recognized as DropBeam', 'error');
     }
@@ -545,10 +562,7 @@ function handleQrResult(url) {
   }
 }
 
-// Dynamically load jsQR for scanning
-const jsQRScript = document.createElement('script');
-jsQRScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
-document.head.appendChild(jsQRScript);
+// jsQR is loaded via index.html script tag
 
 // =============================================
 // SMOOTH NAV

@@ -210,6 +210,26 @@ function cleanupExpiredFiles() {
 }
 
 // =============================================
+// ADMIN / DEBUG
+// =============================================
+function adminStatus() {
+  const now = Date.now();
+  const items = [];
+  for (const [code, entry] of transferStore.entries()) {
+    items.push({
+      code,
+      createdAt: entry.createdAt,
+      expiresAt: entry.expiresAt,
+      expired: now > entry.expiresAt,
+      downloadCount: entry.downloadCount || 0,
+      fileCount: entry.files.length,
+      files: entry.files.map(f => ({ name: f.originalname, size: f.size }))
+    });
+  }
+  return { success: true, count: items.length, transfers: items };
+}
+
+// =============================================
 // EXPORTS
 // =============================================
 module.exports = {
@@ -217,4 +237,5 @@ module.exports = {
   getFileInfo,
   downloadFile,
   cleanupExpiredFiles,
+  adminStatus,
 };

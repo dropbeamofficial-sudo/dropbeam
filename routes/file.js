@@ -24,5 +24,14 @@ module.exports = (io) => {
     return fileController.downloadFile(req, res, io);
   });
 
+  // Admin: list current transfers (protected by ADMIN_TOKEN)
+  router.get('/admin/transfers', (req, res) => {
+    const adminToken = process.env.ADMIN_TOKEN;
+    if (!adminToken) return res.status(403).json({ success: false, error: 'ADMIN_TOKEN not configured' });
+    const auth = (req.headers.authorization || '').replace(/^Bearer\s*/i, '');
+    if (auth !== adminToken) return res.status(401).json({ success: false, error: 'Unauthorized' });
+    return res.json(fileController.adminStatus());
+  });
+
   return router;
 };

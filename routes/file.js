@@ -24,6 +24,11 @@ module.exports = (io) => {
     return fileController.downloadFile(req, res, io);
   });
 
+  // Stats: live transfer statistics
+  router.get('/api/stats', (req, res) => {
+    return res.json(fileController.getStats());
+  });
+
   // Admin: list current transfers (protected by ADMIN_TOKEN)
   router.get('/admin/transfers', (req, res) => {
     const adminToken = process.env.ADMIN_TOKEN;

@@ -39,9 +39,6 @@ const limiter = rateLimit({
 app.use('/upload', limiter);
 app.use('/download', limiter);
 
-// Serve static client files
-app.use(express.static(path.join(__dirname, '../client')));
-
 // ---- Routes ----
 app.use('/', fileRoutes(io));
 

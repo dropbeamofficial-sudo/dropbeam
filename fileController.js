@@ -1,6 +1,6 @@
 /**
  * DropBeam — controllers/fileController.js
- * Handles upload, download, metadata, cleanup
+ * Handles upload, download, metadata, cleanup, stats
  */
 
 const path = require('path');
@@ -33,7 +33,7 @@ function generateCode() {
 }
 
 // =============================================
-// ENCRYPT FILE (AES-256-GCM)
+// ENCRYPT FILE (AES-256-CBC)
 // =============================================
 function encryptBuffer(buffer) {
   const key = crypto.randomBytes(32);
@@ -42,7 +42,6 @@ function encryptBuffer(buffer) {
   const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
   return { encrypted, key: key.toString('hex'), iv: iv.toString('hex') };
 }
-
 
 function decryptBuffer(encrypted, keyHex, ivHex) {
   const key = Buffer.from(keyHex, 'hex');
@@ -65,16 +64,12 @@ async function uploadFiles(req, res, io) {
     const fileRecords = [];
 
     for (const file of req.files) {
-      // Read the uploaded buffer
       const buffer = fs.readFileSync(file.path);
-
-      // Encrypt
       const { encrypted, key, iv } = encryptBuffer(buffer);
 
-      // Write encrypted file
       const encPath = file.path + '.enc';
       fs.writeFileSync(encPath, encrypted);
-      fs.unlinkSync(file.path); // remove unencrypted temp file
+      fs.unlinkSync(file.path);
 
       fileRecords.push({
         originalname: file.originalname,
@@ -149,7 +144,6 @@ async function downloadFile(req, res, io) {
     entry.downloadCount = (entry.downloadCount || 0) + 1;
     console.log(`[Download] Code ${code} | Downloads: ${entry.downloadCount}`);
 
-    // Notify via Socket.io
     if (io) {
       io.to(`room:${code}`).emit('file:received', {
         code,
@@ -158,7 +152,7 @@ async function downloadFile(req, res, io) {
       });
     }
 
-    // Single file — decrypt and send
+    // Single file
     if (entry.files.length === 1) {
       const fileRecord = entry.files[0];
       const encBuffer = fs.readFileSync(fileRecord.encPath);
@@ -169,7 +163,7 @@ async function downloadFile(req, res, io) {
       return res.send(decBuffer);
     }
 
-    // Multiple files — zip and stream
+    // Multiple files — zip
     res.setHeader('Content-Disposition', `attachment; filename="DropBeam-${code}.zip"`);
     res.setHeader('Content-Type', 'application/zip');
     const archive = archiver('zip', { zlib: { level: 9 } });
@@ -210,6 +204,32 @@ function cleanupExpiredFiles() {
 }
 
 // =============================================
+// STATS
+// =============================================
+function getStats() {
+  const now = Date.now();
+  let totalTransfers = 0;
+  let totalDataTransferred = 0;
+  let activeTransfers = 0;
+
+  for (const [, entry] of transferStore.entries()) {
+    const isExpired = now > entry.expiresAt;
+    if (!isExpired) {
+      totalTransfers++;
+      activeTransfers++;
+      entry.files.forEach(f => { totalDataTransferred += f.size; });
+    }
+  }
+
+  return {
+    success: true,
+    totalTransfers,
+    totalDataTransferred,
+    activeTransfers,
+  };
+}
+
+// =============================================
 // ADMIN / DEBUG
 // =============================================
 function adminStatus() {
@@ -237,5 +257,6 @@ module.exports = {
   getFileInfo,
   downloadFile,
   cleanupExpiredFiles,
+  getStats,
   adminStatus,
 };

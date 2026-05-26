@@ -1,15 +1,12 @@
 /**
  * DropBeam — script.js
- * Frontend logic: upload, code display, QR, receive, progress, QR scanning
+ * Complete frontend logic: loader, particles, upload, QR, receive, scanner, transfer viz
  */
 
 // =============================================
 // CONFIG
 // =============================================
-// `window.__BACKEND_URL__` may be injected in `index.html` on Vercel deploys.
-// Fallback to same-origin when not provided (useful for local dev).
 const API_BASE = (window.__BACKEND_URL__ && window.__BACKEND_URL__.length) ? window.__BACKEND_URL__ : window.location.origin;
-// same-origin in production
 
 // =============================================
 // STATE
@@ -19,7 +16,7 @@ let currentCode = null;
 let expiryInterval = null;
 let expirySeconds = 900; // 15 min
 let qrCodeInstance = null;
-let qrStream = null;  // camera stream
+let qrStream = null;
 let scanning = false;
 
 // =============================================
@@ -56,6 +53,158 @@ const scanQrBtn = document.getElementById('scan-qr-btn');
 const qrScannerCard = document.getElementById('qr-scanner-card');
 const closeScanner = document.getElementById('close-scanner');
 const qrVideo = document.getElementById('qr-video');
+const loaderScreen = document.getElementById('loader-screen');
+const particlesCanvas = document.getElementById('particles-canvas');
+const navToggle = document.getElementById('nav-toggle');
+const navLinks = document.getElementById('nav-links');
+const transferParticles = document.getElementById('transfer-particles');
+
+// =============================================
+// PAGE LOADER
+// =============================================
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    if (loaderScreen) loaderScreen.classList.add('hidden');
+  }, 1000);
+});
+
+// =============================================
+// PARTICLE CANVAS
+// =============================================
+if (particlesCanvas) {
+  const ctx = particlesCanvas.getContext('2d');
+  let particles = [];
+  let animId;
+
+  function resizeCanvas() {
+    const hero = particlesCanvas.parentElement;
+    particlesCanvas.width = hero.offsetWidth;
+    particlesCanvas.height = hero.offsetHeight;
+  }
+
+  class Particle {
+    constructor() { this.reset(); }
+    reset() {
+      this.x = Math.random() * particlesCanvas.width;
+      this.y = Math.random() * particlesCanvas.height;
+      this.size = Math.random() * 2 + 0.5;
+      this.speedX = (Math.random() - 0.5) * 0.3;
+      this.speedY = (Math.random() - 0.5) * 0.3;
+      this.opacity = Math.random() * 0.5 + 0.1;
+    }
+    update() {
+      this.x += this.speedX;
+      this.y += this.speedY;
+      if (this.x < 0 || this.x > particlesCanvas.width) this.speedX *= -1;
+      if (this.y < 0 || this.y > particlesCanvas.height) this.speedY *= -1;
+    }
+    draw() {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(79, 142, 255, ${this.opacity})`;
+      ctx.fill();
+    }
+  }
+
+  function initParticles() {
+    resizeCanvas();
+    const count = Math.min(80, Math.floor(particlesCanvas.width * particlesCanvas.height / 10000));
+    particles = Array.from({ length: count }, () => new Particle());
+  }
+
+  function drawConnections() {
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = `rgba(79, 142, 255, ${0.06 * (1 - dist / 120)})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  function animateParticles() {
+    ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
+    particles.forEach(p => { p.update(); p.draw(); });
+    drawConnections();
+    animId = requestAnimationFrame(animateParticles);
+  }
+
+  initParticles();
+  animateParticles();
+  window.addEventListener('resize', () => { resizeCanvas(); if (particles.length < 20) initParticles(); });
+}
+
+// =============================================
+// MAGNETIC BUTTON EFFECT
+// =============================================
+document.querySelectorAll('.magnetic-wrap').forEach(wrap => {
+  const magnetic = wrap.querySelector('.magnetic');
+  if (!magnetic) return;
+  wrap.addEventListener('mousemove', (e) => {
+    const rect = wrap.getBoundingClientRect();
+    const x = e.clientX - rect.left - rect.width / 2;
+    const y = e.clientY - rect.top - rect.height / 2;
+    magnetic.style.transform = `translate(${x * 0.15}px, ${y * 0.15}px)`;
+  });
+  wrap.addEventListener('mouseleave', () => {
+    magnetic.style.transform = 'translate(0, 0)';
+  });
+});
+
+// =============================================
+// SCROLL REVEAL
+// =============================================
+const revealObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+// =============================================
+// NAV TOGGLE (MOBILE)
+// =============================================
+if (navToggle && navLinks) {
+  navToggle.addEventListener('click', () => {
+    navLinks.classList.toggle('open');
+    navToggle.classList.toggle('active');
+  });
+  // Close nav on link click
+  navLinks.querySelectorAll('a').forEach(a => {
+    a.addEventListener('click', () => {
+      navLinks.classList.remove('open');
+      navToggle.classList.remove('active');
+    });
+  });
+}
+
+// =============================================
+// TRANSFER PARTICLES (upload animation)
+// =============================================
+function createTransferParticles() {
+  if (!transferParticles) return;
+  transferParticles.innerHTML = '';
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement('div');
+    p.className = 'transfer-particle';
+    p.style.left = Math.random() * 100 + '%';
+    p.style.bottom = '0%';
+    p.style.animationDuration = (1.5 + Math.random() * 1.5) + 's';
+    p.style.animationDelay = Math.random() * 1.5 + 's';
+    transferParticles.appendChild(p);
+  }
+}
 
 // =============================================
 // TOAST NOTIFICATIONS
@@ -133,7 +282,6 @@ function addFiles(files) {
   });
   if (!valid.length) return;
 
-  // Deduplicate
   valid.forEach(f => {
     if (!selectedFiles.find(sf => sf.name === f.name && sf.size === f.size)) {
       selectedFiles.push(f);
@@ -160,7 +308,6 @@ function renderFileList() {
     fileItems.appendChild(div);
   });
 
-  // Remove buttons
   fileItems.querySelectorAll('.file-item-remove').forEach(btn => {
     btn.addEventListener('click', () => {
       selectedFiles.splice(Number(btn.dataset.idx), 1);
@@ -182,10 +329,10 @@ uploadBtn.addEventListener('click', handleUpload);
 async function handleUpload() {
   if (!selectedFiles.length) { toast('Please select at least one file', 'error'); return; }
 
-  // Show progress
   progressCard.style.display = 'block';
   codeCard.style.display = 'none';
   setUploadBtn(true);
+  createTransferParticles();
 
   const formData = new FormData();
   selectedFiles.forEach(f => formData.append('files', f));
@@ -198,7 +345,7 @@ async function handleUpload() {
     if (!e.lengthComputable) return;
     const pct = Math.round((e.loaded / e.total) * 100);
     const elapsed = (Date.now() - startTime) / 1000;
-    const speed = (e.loaded - lastLoaded) / (elapsed || 1);
+    const speed = elapsed > 0 ? (e.loaded - lastLoaded) / elapsed : 0;
     lastLoaded = e.loaded;
     startTime = Date.now();
 
@@ -211,11 +358,11 @@ async function handleUpload() {
 
   xhr.addEventListener('load', () => {
     setUploadBtn(false);
+    if (transferParticles) transferParticles.innerHTML = '';
     if (xhr.status === 200) {
       const res = JSON.parse(xhr.responseText);
       if (res.success) {
         showCode(res.code);
-        // clear selected files so next upload starts fresh
         selectedFiles = [];
         fileInput.value = '';
         renderFileList();
@@ -235,6 +382,7 @@ async function handleUpload() {
 
   xhr.addEventListener('error', () => {
     setUploadBtn(false);
+    if (transferParticles) transferParticles.innerHTML = '';
     progressCard.style.display = 'none';
     toast('Network error. Is the server running?', 'error');
   });
@@ -258,22 +406,19 @@ function showCode(code) {
   currentCode = code;
   codeCard.style.display = 'flex';
 
-  // Populate digits with animation
   const digits = code.split('');
   const ids = ['d0', 'd1', 'd2', 'd3', 'd4', 'd5'];
   ids.forEach((id, i) => {
     const el = document.getElementById(id);
     el.style.animation = 'none';
-    void el.offsetWidth; // reflow
+    void el.offsetWidth;
     el.style.animation = '';
     el.style.animationDelay = `${i * 0.06}s`;
     el.textContent = digits[i];
   });
 
-  // QR Code
   generateQR(code);
 
-  // Expiry countdown
   clearInterval(expiryInterval);
   expirySeconds = 900;
   updateExpiryDisplay();
@@ -299,10 +444,8 @@ function generateQR(code) {
   const canvas = document.getElementById('qr-canvas');
   const qrUrl = `${window.location.origin}?code=${code}`;
 
-  // Use QRCode.js library
   if (typeof QRCode !== 'undefined') {
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    // QRCode.js doesn't expose canvas API directly, use div approach
     const qrDiv = document.createElement('div');
     new QRCode(qrDiv, {
       text: qrUrl,
@@ -317,17 +460,14 @@ function generateQR(code) {
     canvas.width = 200; canvas.height = 200;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (img) {
-      // Draw immediately if already loaded, otherwise draw onload
       const drawImg = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       if (img.complete && img.naturalWidth !== 0) drawImg();
       else img.onload = drawImg;
     } else {
-      // Fallback: render from canvas produced by QRCode.js
       const c = qrDiv.querySelector('canvas');
       if (c) ctx.drawImage(c, 0, 0, canvas.width, canvas.height);
     }
   } else {
-    // Fallback: simple text-based indicator
     const ctx = canvas.getContext('2d');
     canvas.width = 200; canvas.height = 200;
     ctx.fillStyle = '#fff';
@@ -410,7 +550,6 @@ codeInputs.forEach((input, idx) => {
     code.split('').forEach((ch, i) => {
       codeInputs[i].value = ch; codeInputs[i].classList.add('filled');
     });
-    // Scroll to receive section
     document.getElementById('receive').scrollIntoView({ behavior: 'smooth' });
     toast('Code detected from QR! Click Download.', 'info', 5000);
   }
@@ -431,7 +570,6 @@ async function handleReceive() {
   recvLabel.textContent = 'Connecting…';
 
   try {
-    // First: get file metadata
     const metaRes = await fetch(`${API_BASE}/file-info/${code}`);
     if (!metaRes.ok) { toast('Invalid or expired code', 'error'); receiveProgress.style.display = 'none'; return; }
     const meta = await metaRes.json();
@@ -441,7 +579,6 @@ async function handleReceive() {
     rfpSize.textContent = formatBytes(meta.size);
     rfpIcon.textContent = getFileIcon(meta.filename);
 
-    // Stream download with progress
     const xhr = new XMLHttpRequest();
     xhr.open('GET', `${API_BASE}/download/${code}`);
     xhr.responseType = 'blob';
@@ -469,11 +606,9 @@ async function handleReceive() {
         recvBar.style.width = '100%'; recvPct.textContent = '100%';
         recvLabel.textContent = 'Download Ready ✓';
         toast('File ready to save!', 'success');
-        // Auto-trigger download
         const a = document.createElement('a');
         a.href = url; a.download = meta.filename;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        // Reset receive UI shortly after download starts so the page returns to neutral state
         setTimeout(() => resetReceiveUI(), 800);
       } else {
         toast('Download failed', 'error');
@@ -506,8 +641,7 @@ async function openScanner() {
     qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     qrVideo.srcObject = qrStream;
     qrScannerCard.style.display = 'flex';
-    // Some browsers require calling play() for the video element to start producing frames
-    try { await qrVideo.play(); } catch (_) { /* ignore play errors */ }
+    try { await qrVideo.play(); } catch (_) { }
     toast('Point camera at a DropBeam QR code', 'info');
     scanning = true;
     scanFrame();
@@ -524,14 +658,12 @@ function stopScanner() {
 
 function scanFrame() {
   if (!scanning) return;
-  // Create an offscreen canvas and downscale the frame for faster decoding
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (qrVideo.readyState === qrVideo.HAVE_ENOUGH_DATA) {
     const vw = qrVideo.videoWidth || qrVideo.clientWidth;
     const vh = qrVideo.videoHeight || qrVideo.clientHeight;
     if (!vw || !vh) { requestAnimationFrame(scanFrame); return; }
-    // Limit decoding resolution to improve performance
     const maxDim = 800;
     const scale = Math.min(1, maxDim / Math.max(vw, vh));
     canvas.width = Math.max(100, Math.floor(vw * scale));
@@ -539,7 +671,6 @@ function scanFrame() {
     ctx.drawImage(qrVideo, 0, 0, canvas.width, canvas.height);
     try {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      // Use jsQR if available (loaded dynamically)
       if (typeof jsQR !== 'undefined') {
         const code = jsQR(imageData.data, imageData.width, imageData.height);
         if (code && code.data) {
@@ -551,7 +682,6 @@ function scanFrame() {
       console.debug('[QR scan error]', err && err.message);
     }
   }
-  // small delay to avoid CPU spike on some devices
   setTimeout(() => { if (scanning) requestAnimationFrame(scanFrame); }, 50);
 }
 
@@ -565,7 +695,6 @@ function handleQrResult(url) {
         codeInputs[i].value = ch; codeInputs[i].classList.add('filled');
       });
       toast('QR scanned! Starting download…', 'success');
-      // Auto-start the receive flow so scanning leads directly to downloading
       setTimeout(() => {
         try { handleReceive(); } catch (_) { document.getElementById('receive').scrollIntoView({ behavior: 'smooth' }); }
       }, 300);
@@ -576,8 +705,6 @@ function handleQrResult(url) {
     toast('Invalid QR code', 'error');
   }
 }
-
-// jsQR is loaded via index.html script tag
 
 // =============================================
 // SMOOTH NAV
@@ -590,7 +717,43 @@ document.querySelectorAll('a[href^="#"]').forEach(a => {
 });
 
 // =============================================
-// SOCKET.IO (real-time notifications, optional)
+// TRANSFER STATS (Live Visualizer)
+// =============================================
+let statsInterval = null;
+
+async function fetchStats() {
+  try {
+    const res = await fetch(`${API_BASE}/api/stats`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const tvTransfers = document.getElementById('tv-transfers');
+    const tvData = document.getElementById('tv-data-transferred');
+    const tvActive = document.getElementById('tv-active');
+    if (tvTransfers) tvTransfers.textContent = data.totalTransfers || 0;
+    if (tvData) tvData.textContent = formatBytes(data.totalDataTransferred || 0);
+    if (tvActive) tvActive.textContent = data.activeTransfers || 0;
+  } catch (_) { /* silently fail */ }
+}
+
+// Start polling stats when the live section is visible
+const liveSection = document.getElementById('live');
+if (liveSection) {
+  const liveObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        fetchStats();
+        statsInterval = setInterval(fetchStats, 3000);
+      } else if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+      }
+    });
+  }, { threshold: 0.3 });
+  liveObserver.observe(liveSection);
+}
+
+// =============================================
+// SOCKET.IO (real-time notifications)
 // =============================================
 function tryConnectSocket() {
   if (typeof io === 'undefined') return;
@@ -603,5 +766,4 @@ function tryConnectSocket() {
   });
 }
 
-// Try after a short delay to allow Socket.io script to load
 setTimeout(tryConnectSocket, 1000);

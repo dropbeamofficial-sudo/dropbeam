@@ -4,28 +4,90 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>DropBeam — Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;margin:24px}
-    .card{max-width:900px;margin:0 auto}
-    input[type=text]{width:60%;padding:8px;margin-right:8px}
-    button{padding:8px 12px}
-    pre{background:#f6f8fa;padding:12px;border-radius:6px;overflow:auto}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{border:1px solid #ddd;padding:8px;text-align:left}
-    th{background:#f3f4f6}
+    :root {
+      --bg: #070910; --bg-2: #0d1018;
+      --surface: rgba(255,255,255,0.04); --surface-2: rgba(255,255,255,0.07);
+      --border: rgba(255,255,255,0.08); --border-2: rgba(255,255,255,0.14);
+      --accent: #4f8eff; --accent-2: #8b5cf6; --green: #22d3a0; --red: #ff5a5a;
+      --amber: #fbbf24; --text: #f0f2f8; --text-2: #8b92a8; --text-3: #555d73;
+      --font-head: 'Syne', sans-serif; --font-body: 'DM Sans', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+      --radius: 16px; --radius-sm: 10px;
+      --transition: 0.28s cubic-bezier(0.4,0,0.2,1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+      min-height: 100vh; padding: 40px 20px;
+    }
+    .card {
+      max-width: 960px; margin: 0 auto;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 36px 40px;
+      backdrop-filter: blur(20px); box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    h1 {
+      font-family: var(--font-head); font-size: 28px; font-weight: 800;
+      margin-bottom: 8px; letter-spacing: -1px;
+    }
+    .subtitle { color: var(--text-2); font-size: 14px; margin-bottom: 24px; }
+    .admin-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+    input[type=text] {
+      flex: 1; min-width: 180px; padding: 10px 14px;
+      background: var(--bg); border: 1px solid var(--border-2);
+      border-radius: var(--radius-sm); color: var(--text);
+      font-family: var(--font-body); font-size: 14px; outline: none;
+      transition: border-color var(--transition);
+    }
+    input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,142,255,0.15); }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 10px 18px; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 600; font-family: var(--font-body);
+      cursor: pointer; border: none; transition: all var(--transition);
+    }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), #6366f1); color: #fff; }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(79,142,255,0.3); }
+    .btn-ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border-2); }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    #status {
+      font-size: 13px; color: var(--text-2); font-family: var(--font-mono);
+      padding: 8px 0; min-height: 32px;
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+    th, td {
+      padding: 12px 14px; text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--text-2); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
+    tr:hover td { background: var(--surface-2); }
+    .no-data { color: var(--text-3); text-align: center; padding: 40px; font-family: var(--font-mono); }
+    @media (max-width: 768px) {
+      .card { padding: 24px 20px; }
+      table { font-size: 11px; }
+      th, td { padding: 8px 6px; }
+      .admin-controls { flex-direction: column; }
+      input[type=text] { width: 100%; }
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>DropBeam — Admin</h1>
-    <p>Enter your admin token to view current transfers. Token is the same value as `ADMIN_TOKEN` on the backend.</p>
-    <div>
+    <h1>◈ DropBeam — Admin</h1>
+    <p class="subtitle">Monitor active file transfers. Token is the same value as <code style="color:var(--accent);font-family:var(--font-mono)">ADMIN_TOKEN</code> on the backend.</p>
+
+    <div class="admin-controls">
       <input id="token" type="text" placeholder="Enter admin token" />
-      <button id="load">Load Transfers</button>
-      <button id="clear">Clear</button>
+      <button class="btn btn-primary" id="load">⟳ Load Transfers</button>
+      <button class="btn btn-ghost" id="clear">✕ Clear</button>
     </div>
 
-    <div id="status" style="margin-top:12px"></div>
+    <div id="status"></div>
     <div id="results"></div>
   </div>
 
@@ -38,7 +100,7 @@
     const statusEl = document.getElementById('status');
     const results = document.getElementById('results');
 
-    function showStatus(msg, err=false){ statusEl.textContent = msg; statusEl.style.color = err ? 'crimson' : 'black'; }
+    function showStatus(msg, err=false){ statusEl.textContent = msg; statusEl.style.color = err ? 'var(--red)' : 'var(--text-2)'; }
 
     loadBtn.addEventListener('click', async () => {
       const token = tokenInput.value.trim();
@@ -49,13 +111,12 @@
         if(!res.ok){ const text = await res.text(); showStatus('Error: ' + res.status + ' ' + text, true); return; }
         const data = await res.json();
         showStatus('Loaded ' + (data.count || 0) + ' transfers');
-        if(!data.transfers || !data.transfers.length){ results.innerHTML = '<p>No active transfers</p>'; return; }
+        if(!data.transfers || !data.transfers.length){ results.innerHTML = '<div class="no-data">No active transfers</div>'; return; }
 
-        // render table
         let html = '<table><thead><tr><th>Code</th><th>Files</th><th>Count</th><th>Downloads</th><th>Created</th><th>Expires</th></tr></thead><tbody>';
         data.transfers.forEach(t => {
           const files = t.files.map(f=>`${f.name} (${Math.round(f.size/1024)} KB)`).join('<br>');
-          html += `<tr><td>${t.code}</td><td>${files}</td><td>${t.fileCount}</td><td>${t.downloadCount}</td><td>${new Date(t.createdAt).toLocaleString()}</td><td>${new Date(t.expiresAt).toLocaleString()}</td></tr>`;
+          html += `<tr><td style="color:var(--accent)">${t.code}</td><td>${files}</td><td>${t.fileCount}</td><td>${t.downloadCount}</td><td>${new Date(t.createdAt).toLocaleString()}</td><td>${new Date(t.expiresAt).toLocaleString()}</td></tr>`;
         });
         html += '</tbody></table>';
         results.innerHTML = html;

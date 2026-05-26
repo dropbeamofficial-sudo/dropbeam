@@ -69,17 +69,26 @@ window.addEventListener('load', () => {
 });
 
 // =============================================
-// PARTICLE CANVAS
+// PARTICLE CANVAS — optimized
 // =============================================
 if (particlesCanvas) {
   const ctx = particlesCanvas.getContext('2d');
   let particles = [];
   let animId;
+  let frameCount = 0;
+
+  // Detect low-end devices: skip connections every other frame
+  const isLowEnd = !window.requestAnimationFrame || navigator.hardwareConcurrency <= 2 || /iPad|iPhone/i.test(navigator.userAgent);
+  const CONNECTION_INTERVAL = isLowEnd ? 3 : 2; // draw connections every Nth frame
 
   function resizeCanvas() {
     const hero = particlesCanvas.parentElement;
-    particlesCanvas.width = hero.offsetWidth;
-    particlesCanvas.height = hero.offsetHeight;
+    const dpr = window.devicePixelRatio || 1;
+    // Cap canvas size to avoid overdraw on high-DPI screens
+    particlesCanvas.width = Math.min(hero.offsetWidth * Math.min(dpr, 2), 1600);
+    particlesCanvas.height = Math.min(hero.offsetHeight * Math.min(dpr, 2), 1200);
+    particlesCanvas.style.width = hero.offsetWidth + 'px';
+    particlesCanvas.style.height = hero.offsetHeight + 'px';
   }
 
   class Particle {
@@ -87,10 +96,10 @@ if (particlesCanvas) {
     reset() {
       this.x = Math.random() * particlesCanvas.width;
       this.y = Math.random() * particlesCanvas.height;
-      this.size = Math.random() * 2 + 0.5;
-      this.speedX = (Math.random() - 0.5) * 0.3;
-      this.speedY = (Math.random() - 0.5) * 0.3;
-      this.opacity = Math.random() * 0.5 + 0.1;
+      this.size = Math.random() * 1.5 + 0.5;
+      this.speedX = (Math.random() - 0.5) * 0.25;
+      this.speedY = (Math.random() - 0.5) * 0.25;
+      this.opacity = Math.random() * 0.4 + 0.08;
     }
     update() {
       this.x += this.speedX;
@@ -108,21 +117,28 @@ if (particlesCanvas) {
 
   function initParticles() {
     resizeCanvas();
-    const count = Math.min(80, Math.floor(particlesCanvas.width * particlesCanvas.height / 10000));
+    const count = Math.min(isLowEnd ? 25 : 50, Math.floor(particlesCanvas.width * particlesCanvas.height / 15000));
     particles = Array.from({ length: count }, () => new Particle());
   }
 
   function drawConnections() {
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 120) {
+    const len = particles.length;
+    const maxDist = isLowEnd ? 80 : 110;
+    for (let i = 0; i < len; i++) {
+      const pi = particles[i];
+      for (let j = i + 1; j < len; j++) {
+        const pj = particles[j];
+        const dx = pi.x - pj.x;
+        const dy = pi.y - pj.y;
+        // Skip sqrt if we can: compare squared distance
+        const distSq = dx * dx + dy * dy;
+        const maxDistSq = maxDist * maxDist;
+        if (distSq < maxDistSq) {
+          const dist = Math.sqrt(distSq);
           ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = `rgba(79, 142, 255, ${0.06 * (1 - dist / 120)})`;
+          ctx.moveTo(pi.x, pi.y);
+          ctx.lineTo(pj.x, pj.y);
+          ctx.strokeStyle = `rgba(79, 142, 255, ${0.05 * (1 - dist / maxDist)})`;
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
@@ -132,40 +148,68 @@ if (particlesCanvas) {
 
   function animateParticles() {
     ctx.clearRect(0, 0, particlesCanvas.width, particlesCanvas.height);
-    particles.forEach(p => { p.update(); p.draw(); });
-    drawConnections();
+    frameCount++;
+    for (let i = 0; i < particles.length; i++) {
+      particles[i].update();
+      particles[i].draw();
+    }
+    if (frameCount % CONNECTION_INTERVAL === 0) {
+      drawConnections();
+    }
     animId = requestAnimationFrame(animateParticles);
+  }
+
+  // Debounced resize
+  let resizeTimer;
+  function onResize() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeCanvas();
+      // Re-init only if canvas grew significantly
+      if (particles.length < 15) initParticles();
+    }, 200);
   }
 
   initParticles();
   animateParticles();
-  window.addEventListener('resize', () => { resizeCanvas(); if (particles.length < 20) initParticles(); });
+  window.addEventListener('resize', onResize, { passive: true });
 }
 
 // =============================================
-// MAGNETIC BUTTON EFFECT
+// MAGNETIC BUTTON EFFECT — throttled with rAF
 // =============================================
 document.querySelectorAll('.magnetic-wrap').forEach(wrap => {
   const magnetic = wrap.querySelector('.magnetic');
   if (!magnetic) return;
+  let ticking = false;
   wrap.addEventListener('mousemove', (e) => {
-    const rect = wrap.getBoundingClientRect();
-    const x = e.clientX - rect.left - rect.width / 2;
-    const y = e.clientY - rect.top - rect.height / 2;
-    magnetic.style.transform = `translate(${x * 0.15}px, ${y * 0.15}px)`;
-  });
+    if (!ticking) {
+      ticking = true;
+      requestAnimationFrame(() => {
+        const rect = wrap.getBoundingClientRect();
+        const x = e.clientX - rect.left - rect.width / 2;
+        const y = e.clientY - rect.top - rect.height / 2;
+        magnetic.style.transform = `translate(${x * 0.12}px, ${y * 0.12}px)`;
+        ticking = false;
+      });
+    }
+  }, { passive: true });
   wrap.addEventListener('mouseleave', () => {
     magnetic.style.transform = 'translate(0, 0)';
-  });
+  }, { passive: true });
 });
 
 // =============================================
-// SCROLL REVEAL
+// SCROLL REVEAL — with disconnect after all revealed
 // =============================================
 const revealObserver = new IntersectionObserver((entries) => {
+  let allDone = true;
   entries.forEach(entry => {
     if (entry.isIntersecting) {
       entry.target.classList.add('visible');
+      revealObserver.unobserve(entry.target);
+    } else {
+      allDone = false;
     }
   });
 }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
@@ -180,30 +224,30 @@ if (navToggle && navLinks) {
     navLinks.classList.toggle('open');
     navToggle.classList.toggle('active');
   });
-  // Close nav on link click
-  navLinks.querySelectorAll('a').forEach(a => {
-    a.addEventListener('click', () => {
+  // Close nav on link click — use event delegation
+  navLinks.addEventListener('click', (e) => {
+    if (e.target.tagName === 'A') {
       navLinks.classList.remove('open');
       navToggle.classList.remove('active');
-    });
+    }
   });
 }
 
 // =============================================
-// TRANSFER PARTICLES (upload animation)
+// TRANSFER PARTICLES (upload animation) — optimized
 // =============================================
 function createTransferParticles() {
   if (!transferParticles) return;
-  transferParticles.innerHTML = '';
-  for (let i = 0; i < 8; i++) {
+  // Use DocumentFragment for batch DOM insert
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < 6; i++) {
     const p = document.createElement('div');
     p.className = 'transfer-particle';
-    p.style.left = Math.random() * 100 + '%';
-    p.style.bottom = '0%';
-    p.style.animationDuration = (1.5 + Math.random() * 1.5) + 's';
-    p.style.animationDelay = Math.random() * 1.5 + 's';
-    transferParticles.appendChild(p);
+    p.style.cssText = `left:${Math.random() * 100}%;bottom:0;animation-duration:${1.5 + Math.random() * 1.5}s;animation-delay:${Math.random() * 1.2}s`;
+    frag.appendChild(p);
   }
+  transferParticles.innerHTML = '';
+  transferParticles.appendChild(frag);
 }
 
 // =============================================
@@ -228,13 +272,14 @@ function toast(message, type = 'info', duration = 3500) {
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('.btn');
   if (!btn) return;
+  clearTimeout(rippleTimer);
   const rect = btn.getBoundingClientRect();
   const r = document.createElement('span');
   const size = Math.max(rect.width, rect.height);
   r.className = 'ripple';
   r.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - rect.left - size / 2}px;top:${e.clientY - rect.top - size / 2}px`;
   btn.appendChild(r);
-  r.addEventListener('animationend', () => r.remove());
+  r.addEventListener('animationend', () => r.remove(), { once: true });
 });
 
 // =============================================
@@ -271,7 +316,7 @@ dropZone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
   addFiles([...e.dataTransfer.files]);
-});
+}, { passive: false });
 fileInput.addEventListener('change', () => addFiles([...fileInput.files]));
 
 function addFiles(files) {
@@ -630,7 +675,7 @@ async function handleReceive() {
 }
 
 // =============================================
-// QR SCANNER
+// QR SCANNER — use single rAF loop, no setTimeout
 // =============================================
 scanQrBtn.addEventListener('click', openScanner);
 closeScanner.addEventListener('click', stopScanner);
@@ -638,13 +683,13 @@ closeScanner.addEventListener('click', stopScanner);
 async function openScanner() {
   if (!navigator.mediaDevices) { toast('Camera not supported in this browser', 'error'); return; }
   try {
-    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } } });
     qrVideo.srcObject = qrStream;
     qrScannerCard.style.display = 'flex';
     try { await qrVideo.play(); } catch (_) { }
     toast('Point camera at a DropBeam QR code', 'info');
     scanning = true;
-    scanFrame();
+    requestAnimationFrame(scanFrame);
   } catch (err) {
     toast('Camera access denied', 'error');
   }
@@ -656,33 +701,39 @@ function stopScanner() {
   qrScannerCard.style.display = 'none';
 }
 
+// Reusable canvas for scanning to avoid GC pressure
+const scanCanvas = document.createElement('canvas');
+const scanCtx = scanCanvas.getContext('2d');
+
 function scanFrame() {
   if (!scanning) return;
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
   if (qrVideo.readyState === qrVideo.HAVE_ENOUGH_DATA) {
     const vw = qrVideo.videoWidth || qrVideo.clientWidth;
     const vh = qrVideo.videoHeight || qrVideo.clientHeight;
-    if (!vw || !vh) { requestAnimationFrame(scanFrame); return; }
-    const maxDim = 800;
-    const scale = Math.min(1, maxDim / Math.max(vw, vh));
-    canvas.width = Math.max(100, Math.floor(vw * scale));
-    canvas.height = Math.max(100, Math.floor(vh * scale));
-    ctx.drawImage(qrVideo, 0, 0, canvas.width, canvas.height);
-    try {
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      if (typeof jsQR !== 'undefined') {
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-        if (code && code.data) {
-          handleQrResult(code.data);
-          return;
+    if (vw && vh) {
+      // Downscale for faster QR scanning
+      const scale = Math.min(1, 400 / Math.max(vw, vh));
+      scanCanvas.width = Math.floor(vw * scale);
+      scanCanvas.height = Math.floor(vh * scale);
+      scanCtx.drawImage(qrVideo, 0, 0, scanCanvas.width, scanCanvas.height);
+      try {
+        const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+        if (typeof jsQR !== 'undefined') {
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'dontInvert'
+          });
+          if (code && code.data) {
+            handleQrResult(code.data);
+            return;
+          }
         }
+      } catch (err) {
+        // silently ignore scan errors
       }
-    } catch (err) {
-      console.debug('[QR scan error]', err && err.message);
     }
   }
-  setTimeout(() => { if (scanning) requestAnimationFrame(scanFrame); }, 50);
+  // Throttle to ~10fps for QR scanning to save CPU
+  setTimeout(() => { if (scanning) requestAnimationFrame(scanFrame); }, 100);
 }
 
 function handleQrResult(url) {
@@ -709,15 +760,18 @@ function handleQrResult(url) {
 // =============================================
 // SMOOTH NAV
 // =============================================
-document.querySelectorAll('a[href^="#"]').forEach(a => {
-  a.addEventListener('click', (e) => {
-    const target = document.querySelector(a.getAttribute('href'));
-    if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-  });
-});
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a) return;
+  const target = document.querySelector(a.getAttribute('href'));
+  if (target) {
+    e.preventDefault();
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}, { passive: false });
 
 // =============================================
-// TRANSFER STATS (Live Visualizer)
+// TRANSFER STATS (Live Visualizer) — longer interval
 // =============================================
 let statsInterval = null;
 
@@ -726,12 +780,12 @@ async function fetchStats() {
     const res = await fetch(`${API_BASE}/api/stats`);
     if (!res.ok) return;
     const data = await res.json();
-    const tvTransfers = document.getElementById('tv-transfers');
-    const tvData = document.getElementById('tv-data-transferred');
-    const tvActive = document.getElementById('tv-active');
-    if (tvTransfers) tvTransfers.textContent = data.totalTransfers || 0;
-    if (tvData) tvData.textContent = formatBytes(data.totalDataTransferred || 0);
-    if (tvActive) tvActive.textContent = data.activeTransfers || 0;
+    const elTransfers = document.getElementById('tv-transfers');
+    const elData = document.getElementById('tv-data-transferred');
+    const elActive = document.getElementById('tv-active');
+    if (elTransfers) elTransfers.textContent = data.totalTransfers || 0;
+    if (elData) elData.textContent = formatBytes(data.totalDataTransferred || 0);
+    if (elActive) elActive.textContent = data.activeTransfers || 0;
   } catch (_) { /* silently fail */ }
 }
 
@@ -742,7 +796,7 @@ if (liveSection) {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         fetchStats();
-        statsInterval = setInterval(fetchStats, 3000);
+        statsInterval = setInterval(fetchStats, 6000);
       } else if (statsInterval) {
         clearInterval(statsInterval);
         statsInterval = null;
@@ -752,13 +806,17 @@ if (liveSection) {
   liveObserver.observe(liveSection);
 }
 
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  if (statsInterval) clearInterval(statsInterval);
+});
+
 // =============================================
-// SOCKET.IO (real-time notifications)
+// SOCKET.IO (real-time notifications) — lazy connect
 // =============================================
 function tryConnectSocket() {
   if (typeof io === 'undefined') return;
-  const socket = io(API_BASE);
-  socket.on('connect', () => console.log('[DropBeam] Socket connected'));
+  const socket = io(API_BASE, { transports: ['polling', 'websocket'] });
   socket.on('file:received', (data) => {
     if (data.code === currentCode) {
       toast(`📥 Someone downloaded your file!`, 'success', 5000);
@@ -766,4 +824,4 @@ function tryConnectSocket() {
   });
 }
 
-setTimeout(tryConnectSocket, 1000);
+setTimeout(tryConnectSocket, 2000);

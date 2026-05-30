@@ -81,7 +81,8 @@ if (particlesCanvas) {
   let particles = [];
   let animId;
   let frameCount = 0;
-  window.__isLowEnd = !window.requestAnimationFrame || navigator.hardwareConcurrency <= 2 || (typeof navigator.deviceMemory !== 'undefined' && navigator.deviceMemory <= 4) || /iPad|iPhone/i.test(navigator.userAgent);
+  const isLowEnd = !window.requestAnimationFrame || navigator.hardwareConcurrency <= 2 || (typeof navigator.deviceMemory !== 'undefined' && navigator.deviceMemory <= 4) || /iPad|iPhone/i.test(navigator.userAgent);
+  window.__isLowEnd = isLowEnd;
   const CONNECTION_INTERVAL = isLowEnd ? 4 : 2;
 
   function resizeCanvas() {

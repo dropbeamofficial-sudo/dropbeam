@@ -676,6 +676,7 @@ input { font-family: var(--font-body); }
   filter: blur(8px); opacity: 0.4;
   animation: glow-slide 2s ease-in-out infinite;
 }
+
 @keyframes glow-slide {
   0%,100% { opacity: 0.2; }
   50%     { opacity: 0.6; }
@@ -686,12 +687,46 @@ input { font-family: var(--font-body); }
 .progress-bar-wrap {
   height: 8px; background: var(--surface-2); border-radius: 99px;
   overflow: hidden; margin-bottom: 10px;
+  position: relative;
 }
+.progress-bar-wrap::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    rgba(255,255,255,0.02) 4px,
+    rgba(255,255,255,0.02) 8px
+  );
+  animation: stripe-slide 0.8s linear infinite;
+  pointer-events: none;
+}
+@keyframes stripe-slide {
+  from { background-position: 0 0; }
+  to   { background-position: 8px 0; }
+}
+
 .progress-bar {
   height: 100%; width: 0%; border-radius: 99px;
-  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 50%, var(--cyan) 100%);
+  background-size: 200% 100%;
   transition: width 0.2s ease-out;
+  position: relative;
+  overflow: hidden;
 }
+.progress-bar::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+  background-size: 200% 100%;
+  animation: progress-shimmer 1.8s ease-in-out infinite;
+}
+@keyframes progress-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 .progress-meta {
   display: flex; justify-content: space-between;
   font-size: 12px; color: var(--text-3); font-family: var(--font-mono);
@@ -741,11 +776,58 @@ input { font-family: var(--font-body); }
   background: rgba(34,211,160,0.06);
   border: 1px solid rgba(34,211,160,0.2);
   animation: fade-up 0.4s ease both;
+  transition: all 0.3s ease;
 }
+.recv-file-preview:hover {
+  border-color: rgba(34,211,160,0.5);
+  background: rgba(34,211,160,0.1);
+  box-shadow: 0 4px 20px rgba(34,211,160,0.1);
+}
+
 .rfp-icon { font-size: 28px; }
 .rfp-details { flex: 1; min-width: 0; }
 .rfp-details span { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rfp-details small { font-size: 12px; color: var(--text-3); font-family: var(--font-mono); }
+
+.rfp-download-btn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1);
+}
+.rfp-download-btn:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 6px 24px rgba(34,211,160,0.4);
+}
+.rfp-download-btn:active {
+  transform: scale(0.96);
+}
+.rfp-download-btn::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, var(--green), var(--accent));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  border-radius: inherit;
+}
+.rfp-download-btn:hover::before {
+  opacity: 1;
+}
+.rfp-download-btn .btn-text {
+  position: relative;
+  z-index: 1;
+  transition: transform 0.3s ease;
+}
+.rfp-download-btn:hover .btn-text {
+  transform: translateX(3px);
+}
+.rfp-download-btn .btn-icon {
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+.rfp-download-btn:hover .btn-icon {
+  transform: translateY(2px) scale(1.2);
+}
+
 
 /* QR Scanner */
 .qr-scanner-card {

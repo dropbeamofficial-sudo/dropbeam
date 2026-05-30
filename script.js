@@ -420,6 +420,9 @@ async function handleUpload() {
   try {
     // Step 1: Init upload - get encryption keys and signed URLs
     progressLabel.textContent = 'Initializing...';
+    const uploadStartTime = Date.now();
+    let lastBytes = 0;
+    let lastTime = uploadStartTime;
     const initRes = await fetch(FUNCTIONS_BASE + '/init-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -464,6 +467,14 @@ async function handleUpload() {
       }
 
       uploadedBytes += originalFile.size;
+      const now = Date.now();
+      const elapsed = (now - uploadStartTime) / 1000;
+      if (elapsed > 0) {
+        const speedBps = uploadedBytes / elapsed;
+        document.getElementById('progress-speed').textContent = (speedBps >= 1048576
+          ? (speedBps / 1048576).toFixed(1) + ' MB/s'
+          : (speedBps / 1024).toFixed(0) + ' KB/s');
+      }
       const pct = Math.round((uploadedBytes / totalSize) * 100);
       progressBar.style.width = pct + '%';
       progressPct.textContent = pct + '%';
@@ -709,125 +720,187 @@ codeInputs.forEach((input, idx) => {
 receiveBtn.addEventListener('click', handleReceive);
 
 async function handleReceive() {
-  const code = codeInputs.map(i => i.value).join('');
-  if (code.length < 6) { toast('Please enter the full 6-digit code', 'error'); return; }
+  const code = codeInputs.map(function(i) { return i.value; }).join("");
+  if (code.length < 6) { toast("Please enter the full 6-digit code", "error"); return; }
 
-  receiveProgress.style.display = 'block';
-  recvFileInfo.style.display = 'none';
-  recvBar.style.width = '0%';
-  recvPct.textContent = '0%';
+  receiveProgress.style.display = "block";
+  recvFileInfo.style.display = "none";
+  recvBar.style.width = "0%";
+  recvPct.textContent = "0%";
   receiveBtn.disabled = true;
   receiveBtn.querySelector(".btn-text").textContent = "Downloading...";
   recvLabel.textContent = "Fetching file info...";
+  recvSpeed.textContent = "-- KB/s";
 
   try {
-    // Step 1: Get file info
-    const infoRes = await fetch(FUNCTIONS_BASE + '/file-info?code=' + code);
+    var infoRes = await fetch(FUNCTIONS_BASE + "/file-info?code=" + code);
     if (!infoRes.ok) {
-      toast('Invalid or expired code', 'error');
-      receiveProgress.style.display = 'none';
+      toast("Invalid or expired code", "error");
+      receiveProgress.style.display = "none";
       return;
     }
-    const infoData = await infoRes.json();
+    var infoData = await infoRes.json();
     if (!infoData.success) {
-      toast(infoData.error || 'Invalid or expired code', 'error');
-      receiveProgress.style.display = 'none';
+      toast(infoData.error || "Invalid or expired code", "error");
+      receiveProgress.style.display = "none";
       return;
     }
 
-    const files = infoData.files;
+    var files = infoData.files;
     if (!files || files.length === 0) {
-      toast('No files found for this code', 'error');
-      receiveProgress.style.display = 'none';
+      toast("No files found for this code", "error");
+      receiveProgress.style.display = "none";
       return;
     }
 
-    // Show first file info
-    const firstFile = files[0];
-    recvLabel.textContent = 'Downloading ' + firstFile.originalName + '...';
+    var firstFile = files[0];
+    recvLabel.textContent = "Downloading " + firstFile.originalName + "...";
     rfpName.textContent = firstFile.originalName;
     rfpSize.textContent = formatBytes(firstFile.size);
     rfpIcon.textContent = getFileIcon(firstFile.originalName);
+    rfpDownloadBtn.style.display = "none";
 
-    // Step 2: Initiate download to get signed URL and encryption keys
-    const dlRes = await fetch(FUNCTIONS_BASE + '/get-download', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code })
+    if (files.length > 1) {
+      rfpName.textContent = firstFile.originalName + " +" + (files.length - 1) + " more";
+    }
+
+    var dlRes = await fetch(FUNCTIONS_BASE + "/get-download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: code })
     });
+    if (!dlRes.ok) { throw new Error("Download request failed"); }
+    var dlData = await dlRes.json();
+    if (!dlData.success) { throw new Error(dlData.error || "Download failed"); }
+    var downloadFiles = dlData.files || [];
+    if (downloadFiles.length === 0) { throw new Error("No download files returned"); }
 
-    if (!dlRes.ok) {
-      throw new Error('Download request failed');
+    var totalEncryptedSize = 0;
+    for (var fi = 0; fi < downloadFiles.length; fi++) {
+      totalEncryptedSize += (downloadFiles[fi].encryptedSize || downloadFiles[fi].size || 0);
+    }
+    var totalDownloadedBytes = 0;
+    var allDecryptedBuffers = [];
+    var allOriginalNames = [];
+    var allMimeTypes = [];
+    var downloadStartTime = Date.now();
+
+    for (var fi = 0; fi < downloadFiles.length; fi++) {
+      var dlFile = downloadFiles[fi];
+      recvLabel.textContent = "Downloading (" + (fi + 1) + "/" + downloadFiles.length + ") " + dlFile.originalName + "...";
+
+      var streamRes = await fetch(dlFile.downloadUrl);
+      if (!streamRes.ok) { throw new Error("Failed to download " + dlFile.originalName); }
+
+      if (!streamRes.body) {
+        var fullBlob = await streamRes.blob();
+        totalDownloadedBytes += fullBlob.size;
+        var pct = Math.min(100, Math.round((totalDownloadedBytes / totalEncryptedSize) * 100));
+        recvBar.style.width = pct + "%";
+        recvPct.textContent = pct + "%";
+        var fileDecrypted = await decryptFile(fullBlob, dlFile.encryptionKey, dlFile.encryptionIV);
+        allDecryptedBuffers.push(fileDecrypted);
+        allOriginalNames.push(dlFile.originalName);
+        allMimeTypes.push(dlFile.mimeType || "application/octet-stream");
+        continue;
+      }
+
+      var reader = streamRes.body.getReader();
+      var chunks = [];
+      while (true) {
+        var result = await reader.read();
+        if (result.done) break;
+        chunks.push(result.value);
+        totalDownloadedBytes += result.value.length;
+
+        var elapsed = (Date.now() - downloadStartTime) / 1000;
+        if (elapsed > 0) {
+          var speedBps = totalDownloadedBytes / elapsed;
+          recvSpeed.textContent = speedBps >= 1048576
+            ? (speedBps / 1048576).toFixed(1) + " MB/s"
+            : (speedBps / 1024).toFixed(0) + " KB/s";
+        }
+        var pct = Math.min(100, Math.round((totalDownloadedBytes / totalEncryptedSize) * 100));
+        recvBar.style.width = pct + "%";
+        recvPct.textContent = pct + "%";
+        recvSize.textContent = formatBytes(totalDownloadedBytes) + " / " + formatBytes(totalEncryptedSize);
+      }
+
+      var fileLength = 0;
+      for (var ci = 0; ci < chunks.length; ci++) {
+        fileLength += chunks[ci].length;
+      }
+      var fileBuffer = new Uint8Array(fileLength);
+      var offset = 0;
+      for (var ci = 0; ci < chunks.length; ci++) {
+        fileBuffer.set(chunks[ci], offset);
+        offset += chunks[ci].length;
+      }
+
+      recvLabel.textContent = "Decrypting " + dlFile.originalName + "...";
+      var encBlob = new Blob([fileBuffer], { type: "application/octet-stream" });
+      var fileDecrypted = await decryptFile(encBlob, dlFile.encryptionKey, dlFile.encryptionIV);
+      allDecryptedBuffers.push(fileDecrypted);
+      allOriginalNames.push(dlFile.originalName);
+      allMimeTypes.push(dlFile.mimeType || "application/octet-stream");
     }
 
-    const dlData = await dlRes.json();
-    if (!dlData.success) {
-      throw new Error(dlData.error || 'Download failed');
+    recvBar.style.width = "100%";
+    recvPct.textContent = "100%";
+    recvLabel.textContent = "Download Ready" + " ✓";
+    recvFileInfo.style.display = "flex";
+    rfpDownloadBtn.style.display = "inline-flex";
+
+    if (allDecryptedBuffers.length === 1) {
+      var decryptedBlob = new Blob([allDecryptedBuffers[0]], { type: allMimeTypes[0] });
+      var url = URL.createObjectURL(decryptedBlob);
+      rfpDownloadBtn.href = url;
+      rfpDownloadBtn.download = allOriginalNames[0];
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = allOriginalNames[0];
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast("File decrypted and saved!", "success");
+    } else {
+      rfpName.textContent = allOriginalNames[0] + " +" + (allOriginalNames.length - 1) + " more";
+      for (var fi = 0; fi < allDecryptedBuffers.length; fi++) {
+        (function(fIdx) {
+          setTimeout(function() {
+            var dB = new Blob([allDecryptedBuffers[fIdx]], { type: allMimeTypes[fIdx] });
+            var u = URL.createObjectURL(dB);
+            var a = document.createElement("a");
+            a.href = u;
+            a.download = allOriginalNames[fIdx];
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }, fIdx * 500);
+        })(fi);
+      }
+      var firstUrl = URL.createObjectURL(new Blob([allDecryptedBuffers[0]], { type: allMimeTypes[0] }));
+      rfpDownloadBtn.href = firstUrl;
+      rfpDownloadBtn.download = allOriginalNames[0];
+      toast("All " + allOriginalNames.length + " files decrypted and saved!", "success");
     }
 
-    const downloadFiles = dlData.files || [];
-    if (downloadFiles.length === 0) {
-      throw new Error('No download files returned');
-    }
-
-    // Step 3: Download encrypted file via signed URL
-    const dlFile = downloadFiles[0];
-    recvLabel.textContent = 'Downloading encrypted file...';
-
-    const encryptedRes = await fetch(dlFile.downloadUrl);
-    if (!encryptedRes.ok) {
-      throw new Error('Failed to download encrypted file from storage');
-    }
-
-    const encryptedBlob = await encryptedRes.blob();
-    const totalBytes = encryptedBlob.size;
-
-    // Update progress
-    recvBar.style.width = '50%';
-    recvPct.textContent = '50%';
-    recvSize.textContent = formatBytes(totalBytes) + ' / ' + formatBytes(firstFile.size);
-
-    // Step 4: Decrypt in browser
-    recvLabel.textContent = 'Decrypting ' + dlFile.originalName + '...';
-    const decryptedData = await decryptFile(encryptedBlob, dlFile.encryptionKey, dlFile.encryptionIV);
-
-    recvBar.style.width = '100%';
-    recvPct.textContent = '100%';
-    recvLabel.textContent = 'Download Ready' + ' ✓';
-
-    // Step 5: Create download link and trigger
-    const decryptedBlob = new Blob([decryptedData], { type: dlFile.mimeType || 'application/octet-stream' });
-    const url = URL.createObjectURL(decryptedBlob);
-
-    rfpDownloadBtn.href = url;
-    rfpDownloadBtn.download = dlFile.originalName;
-    recvFileInfo.style.display = 'flex';
-
-    // Auto-download
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = dlFile.originalName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    toast('File decrypted and saved!', 'success');
     receiveBtn.disabled = false;
-    receiveBtn.querySelector('.btn-text').textContent = 'Download';
-    setTimeout(() => resetReceiveUI(), 1000);
+    receiveBtn.querySelector(".btn-text").textContent = "Download";
+    setTimeout(function() { resetReceiveUI(); }, 2000);
 
   } catch (err) {
-    toast('❌ Download failed: ' + err.message + '. Please try again.', 'error');
+    toast("❌ Download failed: " + err.message + ". Please try again.", "error");
     receiveBtn.disabled = false;
-    receiveBtn.querySelector('.btn-text').textContent = 'Download';
-    receiveProgress.style.display = 'none';
-    console.error('Download error:', err);
+    receiveBtn.querySelector(".btn-text").textContent = "Download";
+    receiveProgress.style.display = "none";
+    console.error("Download error:", err);
   }
 }
 
 // =============================================
 // QR SCANNER
-// =============================================
+// =================================================================
 if (scanQrBtn && closeScanner) {
   scanQrBtn.addEventListener('click', openScanner);
   closeScanner.addEventListener('click', stopScanner);

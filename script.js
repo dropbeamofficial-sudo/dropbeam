@@ -509,9 +509,7 @@ async function handleUpload() {
     setUploadBtn(false);
     if (transferParticles) transferParticles.innerHTML = '';
     progressCard.style.display = 'none';
-    toast('❌ Download failed: ' + err.message + '. Please try again.', 'error');
-    receiveBtn.disabled = false;
-    receiveBtn.querySelector('.btn-text').textContent = 'Download';
+    toast('❌ Upload failed: ' + err.message + '. Please try again.', 'error');
     console.error('Upload error:', err);
   } finally {
     setUploadBtn(false);

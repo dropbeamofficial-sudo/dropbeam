@@ -628,7 +628,36 @@ codeInputs.forEach((input, idx) => {
 
 // =============================================
 // =============================================
-// RECEIVE / DOWNLOAD - Local Express API
+// =============================================
+// FETCH WITH RETRY - Helper
+// =============================================
+async function fetchWithRetry(url, options, maxRetries) {
+  maxRetries = maxRetries || 3;
+  let lastError = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      return res;
+    } catch (err) {
+      lastError = err;
+      if (err.name === 'AbortError') {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
+      if (attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+        console.warn('Fetch attempt ' + (attempt + 1) + ' failed: ' + err.message + '. Retrying in ' + delay + 'ms...');
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  throw new Error('Network error after ' + (maxRetries + 1) + ' attempts. Please check your connection.');
+}
+
+// =============================================
+// RECEIVE / DOWNLOAD - with retry & progress
 // =============================================
 receiveBtn.addEventListener('click', handleReceive);
 
@@ -640,14 +669,30 @@ async function handleReceive() {
   receiveBtn.textContent = 'Fetching...';
 
   try {
-    // Get file info
-    const infoRes = await fetch('/file-info/' + code);
+    // Reset progress UI
+    if (receiveProgress) receiveProgress.style.display = 'block';
+    if (recvLabel) recvLabel.textContent = 'Fetching file info...';
+    if (recvBar) recvBar.style.width = '0%';
+    if (recvPct) recvPct.textContent = '0%';
+    if (recvSpeed) recvSpeed.textContent = '';
+    if (recvSize) recvSize.textContent = '';
+
+    // Step 1: Get file info with retry
+    const infoRes = await fetchWithRetry('/file-info/' + code);
+
     if (!infoRes.ok) {
-      const err = await infoRes.json().catch(() => ({}));
-      throw new Error(err.error || 'File not found or expired');
+      if (infoRes.status === 404) {
+        throw new Error('File not found. The code may be invalid or the transfer has expired.');
+      } else if (infoRes.status >= 500) {
+        throw new Error('Server error (' + infoRes.status + '). Please try again later.');
+      } else {
+        const err = await infoRes.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to retrieve file info (HTTP ' + infoRes.status + ')');
+      }
     }
+
     const info = await infoRes.json();
-    if (!info.filename) throw new Error('File not found');
+    if (!info.filename) throw new Error('File information is incomplete. The transfer may be corrupted.');
 
     // Show download info
     var recvFileInfo = document.getElementById('recv-file-info');
@@ -656,16 +701,64 @@ async function handleReceive() {
       document.getElementById('recv-size').textContent = formatBytes(info.size);
       recvFileInfo.style.display = 'block';
     }
+
+    if (recvLabel) recvLabel.textContent = 'Downloading...';
     receiveBtn.textContent = 'Downloading...';
 
-    // Download the file
-    const dlRes = await fetch('/download/' + code);
+    // Step 2: Download file with retry
+    const dlRes = await fetchWithRetry('/download/' + code);
+
     if (!dlRes.ok) {
-      const err = await dlRes.json().catch(() => ({}));
-      throw new Error(err.error || 'Download failed');
+      if (dlRes.status === 404) {
+        throw new Error('Download file not found. The transfer may have expired.');
+      } else if (dlRes.status >= 500) {
+        throw new Error('Server error (' + dlRes.status + '). Please try again later.');
+      } else {
+        const err = await dlRes.json().catch(() => ({}));
+        throw new Error(err.error || 'Download failed (HTTP ' + dlRes.status + ')');
+      }
     }
 
-    const blob = await dlRes.blob();
+    // Download with progress tracking
+    const contentLength = dlRes.headers.get('content-length');
+    const totalBytes = contentLength ? parseInt(contentLength, 10) : info.size;
+    const reader = dlRes.body.getReader();
+    const chunks = [];
+    let receivedBytes = 0;
+    const downloadStartTime = Date.now();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      receivedBytes += value.length;
+
+      // Update progress
+      if (totalBytes > 0) {
+        const pct = Math.round((receivedBytes / totalBytes) * 100);
+        // Throttle DOM updates to every 100ms
+        var _n = Date.now();
+        if (_n - (window.__lastDlProgress || 0) > 100 || receivedBytes >= totalBytes) {
+          window.__lastDlProgress = _n;
+          if (recvBar) recvBar.style.width = pct + '%';
+          if (recvPct) recvPct.textContent = pct + '%';
+        }
+        if (recvSize) {
+          recvSize.textContent = formatBytes(receivedBytes) + (totalBytes ? ' / ' + formatBytes(totalBytes) : '');
+        }
+        if (recvSpeed) {
+          const elapsed = (Date.now() - downloadStartTime) / 1000;
+          if (elapsed > 0) {
+            const speedBps = receivedBytes / elapsed;
+            recvSpeed.textContent = speedBps >= 1048576
+              ? (speedBps / 1048576).toFixed(1) + ' MB/s'
+              : (speedBps / 1024).toFixed(0) + ' KB/s';
+          }
+        }
+      }
+    }
+    // Build blob from chunks
+    const blob = new Blob(chunks, { type: info.mimeType || 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -675,16 +768,34 @@ async function handleReceive() {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 10000);
 
-    toast('Download started!', 'success');
+    if (recvLabel) recvLabel.textContent = 'Download complete!';
+    if (recvBar) recvBar.style.width = '100%';
+    if (recvPct) recvPct.textContent = '100%';
+
+    toast('Download complete!', 'success');
     receiveBtn.textContent = 'Downloaded!';
     setTimeout(() => { receiveBtn.disabled = false; receiveBtn.textContent = 'Receive'; }, 3000);
   } catch (err) {
-    toast(err.message, 'error');
+        // Clean up file info display
+    var rfi = document.getElementById("recv-file-info");
+    if (rfi) rfi.style.display = "none";
+    // Call resetReceiveUI if available
+    if (typeof resetReceiveUI === "function") resetReceiveUI();
+    // Hide progress on error
+    if (receiveProgress) receiveProgress.style.display = 'none';
+
+    // Friendly error messages
+    let errorMsg = err.message;
+    if (err.name === 'TypeError' && err.message.includes('fetch')) {
+      errorMsg = 'Network error. Please check your internet connection and try again.';
+    }
+
+    toast(errorMsg, 'error', 6000);
     receiveBtn.disabled = false;
     receiveBtn.textContent = 'Receive';
+    console.error('Download error:', err);
   }
 }
-
 // QR SCANNER
 // =================================================================
 if (scanQrBtn && closeScanner) {

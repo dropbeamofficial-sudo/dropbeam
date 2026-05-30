@@ -1,9 +1,21 @@
+#!/usr/bin/env node
+/**
+ * DropBeam — generate-env.js
+ * Generates _env.js with Supabase configuration for the frontend
+ */
+
 const fs = require('fs');
 const path = require('path');
 
-// Create _env.js at project root for Vercel to serve
-const backend = process.env.BACKEND_URL || '';
-const out = `window.__BACKEND_URL__ = ${JSON.stringify(backend)};`;
+const supabaseUrl = process.env.SUPABASE_URL || 'https://tbngouvplswvziszlnee.supabase.co';
+const functionsBase = process.env.FUNCTIONS_BASE || supabaseUrl + '/functions/v1';
+const anonKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRibmdvdXZwbHN3dnppc3psbmVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMzYyMTAsImV4cCI6MjA5NTcxMjIxMH0.IYtJnPMWKLdrhIr3f5JTY819cQOguyKw75JzUvKlhRM';
 
-fs.writeFileSync(path.join(__dirname, '..', '_env.js'), out);
-console.log('Wrote _env.js with BACKEND_URL=', backend);
+const content = `// DropBeam — Supabase configuration (auto-generated at build time)
+window.__SUPABASE_URL__ = '${supabaseUrl}';
+window.__FUNCTIONS_BASE__ = '${functionsBase}';
+window.__SUPABASE_ANON_KEY__ = '${anonKey}';
+`;
+
+fs.writeFileSync(path.join(__dirname, '..', '_env.js'), content);
+console.log('Generated _env.js for Supabase deployment');

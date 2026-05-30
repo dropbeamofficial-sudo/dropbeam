@@ -1,12 +1,14 @@
 /**
- * DropBeam — script.js
- * Complete frontend logic: loader, particles, upload, QR, receive, scanner, transfer viz
+ * DropBeam - script.js
+ * Frontend logic with Supabase Edge Functions + browser-side AES-256 encryption
  */
 
 // =============================================
 // CONFIG
 // =============================================
-const API_BASE = (window.__BACKEND_URL__ && window.__BACKEND_URL__.length) ? window.__BACKEND_URL__ : window.location.origin;
+const SUPABASE_URL = window.__SUPABASE_URL__ || 'https://tbngouvplswvziszlnee.supabase.co';
+const FUNCTIONS_BASE = window.__FUNCTIONS_BASE__ || SUPABASE_URL + '/functions/v1';
+const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY__ || '';
 
 // =============================================
 // STATE
@@ -14,7 +16,7 @@ const API_BASE = (window.__BACKEND_URL__ && window.__BACKEND_URL__.length) ? win
 let selectedFiles = [];
 let currentCode = null;
 let expiryInterval = null;
-let expirySeconds = 900; // 15 min
+let expirySeconds = 900;
 let qrCodeInstance = null;
 let qrStream = null;
 let scanning = false;
@@ -63,28 +65,28 @@ const transferParticles = document.getElementById('transfer-particles');
 // PAGE LOADER
 // =============================================
 window.addEventListener('load', () => {
+  var dbLoaded = sessionStorage.getItem('db_loaded');
+  var delay = dbLoaded ? 200 : 800;
+  sessionStorage.setItem('db_loaded', '1');
   setTimeout(() => {
     if (loaderScreen) loaderScreen.classList.add('hidden');
-  }, 1000);
+  }, delay);
 });
 
 // =============================================
-// PARTICLE CANVAS — optimized
+// PARTICLE CANVAS
 // =============================================
 if (particlesCanvas) {
   const ctx = particlesCanvas.getContext('2d');
   let particles = [];
   let animId;
   let frameCount = 0;
-
-  // Detect low-end devices: skip connections every other frame
-  const isLowEnd = !window.requestAnimationFrame || navigator.hardwareConcurrency <= 2 || /iPad|iPhone/i.test(navigator.userAgent);
-  const CONNECTION_INTERVAL = isLowEnd ? 3 : 2; // draw connections every Nth frame
+  window.__isLowEnd = !window.requestAnimationFrame || navigator.hardwareConcurrency <= 2 || (typeof navigator.deviceMemory !== 'undefined' && navigator.deviceMemory <= 4) || /iPad|iPhone/i.test(navigator.userAgent);
+  const CONNECTION_INTERVAL = isLowEnd ? 4 : 2;
 
   function resizeCanvas() {
     const hero = particlesCanvas.parentElement;
     const dpr = window.devicePixelRatio || 1;
-    // Cap canvas size to avoid overdraw on high-DPI screens
     particlesCanvas.width = Math.min(hero.offsetWidth * Math.min(dpr, 2), 1600);
     particlesCanvas.height = Math.min(hero.offsetHeight * Math.min(dpr, 2), 1200);
     particlesCanvas.style.width = hero.offsetWidth + 'px';
@@ -110,14 +112,14 @@ if (particlesCanvas) {
     draw() {
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(79, 142, 255, ${this.opacity})`;
+      ctx.fillStyle = 'rgba(79, 142, 255, ' + this.opacity + ')';
       ctx.fill();
     }
   }
 
   function initParticles() {
     resizeCanvas();
-    const count = Math.min(isLowEnd ? 25 : 50, Math.floor(particlesCanvas.width * particlesCanvas.height / 15000));
+    const count = Math.min(isLowEnd ? 18 : 35, Math.floor(particlesCanvas.width * particlesCanvas.height / 20000));
     particles = Array.from({ length: count }, () => new Particle());
   }
 
@@ -130,7 +132,6 @@ if (particlesCanvas) {
         const pj = particles[j];
         const dx = pi.x - pj.x;
         const dy = pi.y - pj.y;
-        // Skip sqrt if we can: compare squared distance
         const distSq = dx * dx + dy * dy;
         const maxDistSq = maxDist * maxDist;
         if (distSq < maxDistSq) {
@@ -138,7 +139,7 @@ if (particlesCanvas) {
           ctx.beginPath();
           ctx.moveTo(pi.x, pi.y);
           ctx.lineTo(pj.x, pj.y);
-          ctx.strokeStyle = `rgba(79, 142, 255, ${0.05 * (1 - dist / maxDist)})`;
+          ctx.strokeStyle = 'rgba(79, 142, 255, ' + (0.05 * (1 - dist / maxDist)) + ')';
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
@@ -153,22 +154,31 @@ if (particlesCanvas) {
       particles[i].update();
       particles[i].draw();
     }
-    if (frameCount % CONNECTION_INTERVAL === 0) {
-      drawConnections();
-    }
+    if (frameCount % CONNECTION_INTERVAL === 0) drawConnections();
     animId = requestAnimationFrame(animateParticles);
   }
 
-  // Debounced resize
   let resizeTimer;
   function onResize() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeCanvas();
-      // Re-init only if canvas grew significantly
       if (particles.length < 15) initParticles();
     }, 200);
   }
+
+  // Pause particles when hero is off-screen (saves GPU/CPU on low-RAM)
+  const heroSection = particlesCanvas.closest('section') || particlesCanvas.parentElement;
+  const particleObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        if (!animId) animateParticles();
+      } else {
+        if (animId) { cancelAnimationFrame(animId); animId = null; }
+      }
+    });
+  }, { threshold: 0.05 });
+  if (heroSection) particleObserver.observe(heroSection);
 
   initParticles();
   animateParticles();
@@ -176,9 +186,9 @@ if (particlesCanvas) {
 }
 
 // =============================================
-// MAGNETIC BUTTON EFFECT — throttled with rAF
+// MAGNETIC BUTTON EFFECT (disabled on low-end)
 // =============================================
-document.querySelectorAll('.magnetic-wrap').forEach(wrap => {
+if (!window.__isLowEnd) document.querySelectorAll('.magnetic-wrap').forEach(wrap => {
   const magnetic = wrap.querySelector('.magnetic');
   if (!magnetic) return;
   let ticking = false;
@@ -189,7 +199,7 @@ document.querySelectorAll('.magnetic-wrap').forEach(wrap => {
         const rect = wrap.getBoundingClientRect();
         const x = e.clientX - rect.left - rect.width / 2;
         const y = e.clientY - rect.top - rect.height / 2;
-        magnetic.style.transform = `translate(${x * 0.12}px, ${y * 0.12}px)`;
+        magnetic.style.transform = 'translate(' + (x * 0.12) + 'px, ' + (y * 0.12) + 'px)';
         ticking = false;
       });
     }
@@ -200,16 +210,13 @@ document.querySelectorAll('.magnetic-wrap').forEach(wrap => {
 });
 
 // =============================================
-// SCROLL REVEAL — with disconnect after all revealed
+// SCROLL REVEAL
 // =============================================
 const revealObserver = new IntersectionObserver((entries) => {
-  let allDone = true;
   entries.forEach(entry => {
     if (entry.isIntersecting) {
       entry.target.classList.add('visible');
       revealObserver.unobserve(entry.target);
-    } else {
-      allDone = false;
     }
   });
 }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
@@ -224,7 +231,6 @@ if (navToggle && navLinks) {
     navLinks.classList.toggle('open');
     navToggle.classList.toggle('active');
   });
-  // Close nav on link click — use event delegation
   navLinks.addEventListener('click', (e) => {
     if (e.target.tagName === 'A') {
       navLinks.classList.remove('open');
@@ -234,16 +240,15 @@ if (navToggle && navLinks) {
 }
 
 // =============================================
-// TRANSFER PARTICLES (upload animation) — optimized
+// TRANSFER PARTICLES
 // =============================================
 function createTransferParticles() {
   if (!transferParticles) return;
-  // Use DocumentFragment for batch DOM insert
   const frag = document.createDocumentFragment();
   for (let i = 0; i < 6; i++) {
     const p = document.createElement('div');
     p.className = 'transfer-particle';
-    p.style.cssText = `left:${Math.random() * 100}%;bottom:0;animation-duration:${1.5 + Math.random() * 1.5}s;animation-delay:${Math.random() * 1.2}s`;
+    p.style.cssText = 'left:' + (Math.random() * 100) + '%;bottom:0;animation-duration:' + (1.5 + Math.random() * 1.5) + 's;animation-delay:' + (Math.random() * 1.2) + 's';
     frag.appendChild(p);
   }
   transferParticles.innerHTML = '';
@@ -253,11 +258,13 @@ function createTransferParticles() {
 // =============================================
 // TOAST NOTIFICATIONS
 // =============================================
-function toast(message, type = 'info', duration = 3500) {
+function toast(message, type, duration) {
+  type = type || 'info';
+  duration = duration || 3500;
   const icons = { success: '✅', error: '❌', info: 'ℹ️', loading: '⏳' };
   const el = document.createElement('div');
-  el.className = `toast toast-${type}`;
-  el.innerHTML = `<span class="toast-icon">${icons[type]}</span><span>${message}</span>`;
+  el.className = 'toast toast-' + type;
+  el.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span>' + message + '</span>';
   document.getElementById('toast-container').appendChild(el);
   setTimeout(() => {
     el.classList.add('removing');
@@ -269,6 +276,7 @@ function toast(message, type = 'info', duration = 3500) {
 // =============================================
 // RIPPLE EFFECT
 // =============================================
+let rippleTimer;
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('.btn');
   if (!btn) return;
@@ -277,7 +285,7 @@ document.addEventListener('click', (e) => {
   const r = document.createElement('span');
   const size = Math.max(rect.width, rect.height);
   r.className = 'ripple';
-  r.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - rect.left - size / 2}px;top:${e.clientY - rect.top - size / 2}px`;
+  r.style.cssText = 'width:' + size + 'px;height:' + size + 'px;left:' + (e.clientX - rect.left - size / 2) + 'px;top:' + (e.clientY - rect.top - size / 2) + 'px';
   btn.appendChild(r);
   r.addEventListener('animationend', () => r.remove(), { once: true });
 });
@@ -296,6 +304,7 @@ const FILE_ICONS = {
 };
 
 function getFileIcon(filename) {
+  if (!filename) return '📄';
   const ext = filename.split('.').pop().toLowerCase();
   return FILE_ICONS[ext] || '📄';
 }
@@ -315,18 +324,17 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  addFiles([...e.dataTransfer.files]);
+  addFiles(Array.from(e.dataTransfer.files));
 }, { passive: false });
-fileInput.addEventListener('change', () => addFiles([...fileInput.files]));
+fileInput.addEventListener('change', () => addFiles(Array.from(fileInput.files)));
 
 function addFiles(files) {
-  const MAX = 2 * 1024 * 1024 * 1024; // 2 GB
+  const MAX = 2 * 1024 * 1024 * 1024;
   const valid = files.filter(f => {
-    if (f.size > MAX) { toast(`${f.name} exceeds 2 GB limit`, 'error'); return false; }
+    if (f.size > MAX) { toast(f.name + ' exceeds 2 GB limit', 'error'); return false; }
     return true;
   });
   if (!valid.length) return;
-
   valid.forEach(f => {
     if (!selectedFiles.find(sf => sf.name === f.name && sf.size === f.size)) {
       selectedFiles.push(f);
@@ -342,18 +350,10 @@ function renderFileList() {
   selectedFiles.forEach((f, i) => {
     const div = document.createElement('div');
     div.className = 'file-item';
-    div.innerHTML = `
-      <span class="file-item-icon">${getFileIcon(f.name)}</span>
-      <div class="file-item-info">
-        <div class="file-item-name">${f.name}</div>
-        <div class="file-item-size">${formatBytes(f.size)}</div>
-      </div>
-      <button class="file-item-remove btn" data-idx="${i}">✕</button>
-    `;
+    div.innerHTML = '<span class="file-item-icon">' + getFileIcon(f.name) + '</span><div class="file-item-info"><div class="file-item-name">' + f.name + '</div><div class="file-item-size">' + formatBytes(f.size) + '</div></div><button class="file-item-remove btn" data-idx="' + i + '">✕</button>';
     fileItems.appendChild(div);
   });
-
-  fileItems.querySelectorAll('.file-item-remove').forEach(btn => {
+  Array.from(fileItems.querySelectorAll('.file-item-remove')).forEach(btn => {
     btn.addEventListener('click', () => {
       selectedFiles.splice(Number(btn.dataset.idx), 1);
       renderFileList();
@@ -362,12 +362,50 @@ function renderFileList() {
 }
 
 clearFilesBtn.addEventListener('click', () => {
-  selectedFiles = []; fileInput.value = '';
+  selectedFiles = [];
+  fileInput.value = '';
   renderFileList();
 });
 
 // =============================================
-// UPLOAD
+// BROWSER-SIDE AES-256 ENCRYPTION
+// =============================================
+function arrayBufferToHex(buffer) {
+  return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToArrayBuffer(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes.buffer;
+}
+
+async function encryptFile(file, keyHex, ivHex) {
+  const keyData = hexToArrayBuffer(keyHex);
+  const ivData = hexToArrayBuffer(ivHex);
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw', keyData, { name: 'AES-CBC' }, false, ['encrypt']
+  );
+  const fileData = await file.arrayBuffer();
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: ivData }, cryptoKey, fileData);
+  return new Blob([encrypted], { type: 'application/octet-stream' });
+}
+
+async function decryptFile(encryptedBlob, keyHex, ivHex) {
+  const keyData = hexToArrayBuffer(keyHex);
+  const ivData = hexToArrayBuffer(ivHex);
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw', keyData, { name: 'AES-CBC' }, false, ['decrypt']
+  );
+  const encryptedData = await encryptedBlob.arrayBuffer();
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: ivData }, cryptoKey, encryptedData);
+  return decrypted;
+}
+
+// =============================================
+// UPLOAD - INIT + ENCRYPT + UPLOAD + CONFIRM
 // =============================================
 uploadBtn.addEventListener('click', handleUpload);
 
@@ -379,68 +417,112 @@ async function handleUpload() {
   setUploadBtn(true);
   createTransferParticles();
 
-  const formData = new FormData();
-  selectedFiles.forEach(f => formData.append('files', f));
+  try {
+    // Step 1: Init upload - get encryption keys and signed URLs
+    progressLabel.textContent = 'Initializing...';
+    const initRes = await fetch(FUNCTIONS_BASE + '/init-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: selectedFiles.map(f => ({ name: f.name, size: f.size, type: f.type || 'application/octet-stream' })) })
+    });
 
-  const xhr = new XMLHttpRequest();
-  let startTime = Date.now();
-  let lastLoaded = 0;
-
-  xhr.upload.addEventListener('progress', (e) => {
-    if (!e.lengthComputable) return;
-    const pct = Math.round((e.loaded / e.total) * 100);
-    const elapsed = (Date.now() - startTime) / 1000;
-    const speed = elapsed > 0 ? (e.loaded - lastLoaded) / elapsed : 0;
-    lastLoaded = e.loaded;
-    startTime = Date.now();
-
-    progressBar.style.width = pct + '%';
-    progressPct.textContent = pct + '%';
-    progressLabel.textContent = 'Uploading…';
-    progressSpeed.textContent = formatBytes(speed) + '/s';
-    progressSize.textContent = `${formatBytes(e.loaded)} / ${formatBytes(e.total)}`;
-  });
-
-  xhr.addEventListener('load', () => {
-    setUploadBtn(false);
-    if (transferParticles) transferParticles.innerHTML = '';
-    if (xhr.status === 200) {
-      const res = JSON.parse(xhr.responseText);
-      if (res.success) {
-        showCode(res.code);
-        selectedFiles = [];
-        fileInput.value = '';
-        renderFileList();
-        progressBar.style.width = '100%';
-        progressPct.textContent = '100%';
-        progressLabel.textContent = 'Upload Complete ✓';
-        toast('File uploaded successfully!', 'success');
-      } else {
-        toast(res.error || 'Upload failed', 'error');
-        progressCard.style.display = 'none';
-      }
-    } else {
-      toast('Upload failed. Check server connection.', 'error');
-      progressCard.style.display = 'none';
+    if (!initRes.ok) {
+      const errData = await initRes.json().catch(() => ({}));
+      throw new Error(errData.error || 'Failed to initialize upload (HTTP ' + initRes.status + ')');
     }
-  });
 
-  xhr.addEventListener('error', () => {
+    const initData = await initRes.json();
+    if (!initData.success) throw new Error(initData.error || 'Failed to initialize upload');
+
+    const code = initData.code;
+    const fileEntries = initData.files;
+    const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+    let uploadedBytes = 0;
+
+    // Step 2: Encrypt and upload each file
+    const confirmedFiles = [];
+    for (let i = 0; i < fileEntries.length; i++) {
+      const fe = fileEntries[i];
+      const originalFile = selectedFiles[i];
+
+      progressLabel.textContent = 'Encrypting ' + originalFile.name + '...';
+
+      // Encrypt file in browser
+      const encryptedBlob = await encryptFile(originalFile, fe.encryptionKey, fe.encryptionIV);
+
+      progressLabel.textContent = 'Uploading ' + originalFile.name + '...';
+
+      // Upload encrypted blob to Supabase Storage via signed URL
+      const uploadRes = await fetch(fe.signedUploadUrl, {
+        method: 'PUT',
+        body: encryptedBlob,
+        headers: { 'Content-Type': 'application/octet-stream' }
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error('Failed to upload ' + originalFile.name + ' to storage');
+      }
+
+      uploadedBytes += originalFile.size;
+      const pct = Math.round((uploadedBytes / totalSize) * 100);
+      progressBar.style.width = pct + '%';
+      progressPct.textContent = pct + '%';
+      progressSize.textContent = formatBytes(uploadedBytes) + ' / ' + formatBytes(totalSize);
+
+      confirmedFiles.push({
+        originalName: fe.originalName,
+        mimeType: fe.mimeType,
+        size: fe.size,
+        storagePath: fe.storagePath,
+        encryptionKey: fe.encryptionKey,
+        encryptionIV: fe.encryptionIV
+      });
+    }
+
+    // Step 3: Confirm upload - register files in database
+    progressLabel.textContent = 'Finalizing...';
+    const confirmRes = await fetch(FUNCTIONS_BASE + '/confirm-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, files: confirmedFiles })
+    });
+
+    if (!confirmRes.ok) {
+      throw new Error('Failed to confirm upload');
+    }
+
+    const confirmData = await confirmRes.json();
+    if (!confirmData.success) throw new Error(confirmData.error || 'Failed to confirm upload');
+
+    // Success
+    showCode(code);
+    selectedFiles = [];
+    fileInput.value = '';
+    renderFileList();
+    progressBar.style.width = '100%';
+    progressPct.textContent = '100%';
+    progressLabel.textContent = 'Upload Complete' + ' ✓';
+    toast('Files uploaded! Share the code.', 'success');
+    if (transferParticles) transferParticles.innerHTML = '';
+
+  } catch (err) {
     setUploadBtn(false);
     if (transferParticles) transferParticles.innerHTML = '';
     progressCard.style.display = 'none';
-    toast('Network error. Is the server running?', 'error');
-  });
-
-  xhr.open('POST', `${API_BASE}/upload`);
-  xhr.send(formData);
+    toast('❌ Download failed: ' + err.message + '. Please try again.', 'error');
+    receiveBtn.disabled = false;
+    receiveBtn.querySelector('.btn-text').textContent = 'Download';
+    console.error('Upload error:', err);
+  } finally {
+    setUploadBtn(false);
+  }
 }
 
 function setUploadBtn(loading) {
   const btnText = uploadBtn.querySelector('.btn-text');
   const btnLoader = uploadBtn.querySelector('.btn-loader');
-  btnText.style.display = loading ? 'none' : 'inline';
-  btnLoader.style.display = loading ? 'inline' : 'none';
+  if (btnText) btnText.style.display = loading ? 'none' : 'inline';
+  if (btnLoader) btnLoader.style.display = loading ? 'inline' : 'none';
   uploadBtn.disabled = loading;
 }
 
@@ -458,7 +540,7 @@ function showCode(code) {
     el.style.animation = 'none';
     void el.offsetWidth;
     el.style.animation = '';
-    el.style.animationDelay = `${i * 0.06}s`;
+    el.style.animationDelay = (i * 0.06) + 's';
     el.textContent = digits[i];
   });
 
@@ -470,15 +552,22 @@ function showCode(code) {
   expiryInterval = setInterval(() => {
     expirySeconds--;
     updateExpiryDisplay();
-    if (expirySeconds <= 0) { clearInterval(expiryInterval); toast('Transfer code expired', 'error'); resetSendUI(); }
+    if (expirySeconds <= 0) {
+      clearInterval(expiryInterval);
+      toast('Transfer code expired', 'error');
+      resetSendUI();
+    }
   }, 1000);
+
+  // Subscribe to realtime updates for this transfer
+  initSupabaseRealtime();
 }
 
 function updateExpiryDisplay() {
   const m = String(Math.floor(expirySeconds / 60)).padStart(2, '0');
   const s = String(expirySeconds % 60).padStart(2, '0');
   const el = document.getElementById('expiry-countdown');
-  if (el) el.textContent = `${m}:${s}`;
+  if (el) el.textContent = m + ':' + s;
   if (expirySeconds <= 60 && el) el.style.color = 'var(--red)';
 }
 
@@ -487,10 +576,9 @@ function updateExpiryDisplay() {
 // =============================================
 function generateQR(code) {
   const canvas = document.getElementById('qr-canvas');
-  const qrUrl = `${window.location.origin}?code=${code}`;
+  const qrUrl = window.location.origin + '?code=' + code;
 
   if (typeof QRCode !== 'undefined') {
-    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
     const qrDiv = document.createElement('div');
     new QRCode(qrDiv, {
       text: qrUrl,
@@ -502,7 +590,8 @@ function generateQR(code) {
     });
     const img = qrDiv.querySelector('img');
     const ctx = canvas.getContext('2d');
-    canvas.width = 200; canvas.height = 200;
+    canvas.width = 200;
+    canvas.height = 200;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (img) {
       const drawImg = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -514,7 +603,8 @@ function generateQR(code) {
     }
   } else {
     const ctx = canvas.getContext('2d');
-    canvas.width = 200; canvas.height = 200;
+    canvas.width = 200;
+    canvas.height = 200;
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, 200, 200);
     ctx.fillStyle = '#333';
@@ -542,7 +632,8 @@ copyCodeBtn.addEventListener('click', () => {
 newTransferBtn.addEventListener('click', resetSendUI);
 
 function resetSendUI() {
-  selectedFiles = []; fileInput.value = '';
+  selectedFiles = [];
+  fileInput.value = '';
   renderFileList();
   codeCard.style.display = 'none';
   progressCard.style.display = 'none';
@@ -553,27 +644,35 @@ function resetSendUI() {
 function resetReceiveUI() {
   receiveProgress.style.display = 'none';
   recvFileInfo.style.display = 'none';
-  recvBar.style.width = '0%'; recvPct.textContent = '0%';
+  recvBar.style.width = '0%';
+  recvPct.textContent = '0%';
   recvLabel.textContent = '';
-  recvSpeed.textContent = '-- KB/s'; recvSize.textContent = '-- / --';
-  codeInputs.forEach(i => { i.value = ''; i.classList.remove('filled'); });
+  recvSpeed.textContent = '-- KB/s';
+  recvSize.textContent = '-- / --';
+  codeInputs.forEach(i => { i.value = ""; i.classList.remove("filled"); });
+  receiveBtn.disabled = false;
+  const rBtnText = receiveBtn.querySelector(".btn-text");
+  if (rBtnText) rBtnText.textContent = "Download";
 }
 
 // =============================================
-// CODE INPUT — RECEIVE
+// CODE INPUT - RECEIVE
 // =============================================
-const codeInputs = [0, 1, 2, 3, 4, 5].map(i => document.getElementById(`ci${i}`));
+const codeInputs = [0, 1, 2, 3, 4, 5].map(i => document.getElementById('ci' + i));
 
 codeInputs.forEach((input, idx) => {
   input.addEventListener('input', (e) => {
     const val = e.target.value.replace(/\D/g, '');
     e.target.value = val;
-    if (val) { input.classList.add('filled'); if (idx < 5) codeInputs[idx + 1].focus(); }
-    else input.classList.remove('filled');
+    if (val) {
+      input.classList.add('filled');
+      if (idx < 5) codeInputs[idx + 1].focus();
+    } else input.classList.remove('filled');
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Backspace' && !input.value && idx > 0) {
-      codeInputs[idx - 1].focus(); codeInputs[idx - 1].value = '';
+      codeInputs[idx - 1].focus();
+      codeInputs[idx - 1].value = '';
       codeInputs[idx - 1].classList.remove('filled');
     }
   });
@@ -581,7 +680,10 @@ codeInputs.forEach((input, idx) => {
     e.preventDefault();
     const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
     pasted.split('').forEach((ch, i) => {
-      if (codeInputs[i]) { codeInputs[i].value = ch; codeInputs[i].classList.add('filled'); }
+      if (codeInputs[i]) {
+        codeInputs[i].value = ch;
+        codeInputs[i].classList.add('filled');
+      }
     });
     if (pasted.length === 6) receiveBtn.focus();
   });
@@ -593,7 +695,10 @@ codeInputs.forEach((input, idx) => {
   const code = params.get('code');
   if (code && /^\d{6}$/.test(code)) {
     code.split('').forEach((ch, i) => {
-      codeInputs[i].value = ch; codeInputs[i].classList.add('filled');
+      if (codeInputs[i]) {
+        codeInputs[i].value = ch;
+        codeInputs[i].classList.add('filled');
+      }
     });
     document.getElementById('receive').scrollIntoView({ behavior: 'smooth' });
     toast('Code detected from QR! Click Download.', 'info', 5000);
@@ -601,7 +706,7 @@ codeInputs.forEach((input, idx) => {
 })();
 
 // =============================================
-// RECEIVE / DOWNLOAD
+// RECEIVE / DOWNLOAD (via Supabase Edge Functions)
 // =============================================
 receiveBtn.addEventListener('click', handleReceive);
 
@@ -611,82 +716,134 @@ async function handleReceive() {
 
   receiveProgress.style.display = 'block';
   recvFileInfo.style.display = 'none';
-  recvBar.style.width = '0%'; recvPct.textContent = '0%';
-  recvLabel.textContent = 'Connecting…';
+  recvBar.style.width = '0%';
+  recvPct.textContent = '0%';
+  receiveBtn.disabled = true;
+  receiveBtn.querySelector(".btn-text").textContent = "Downloading...";
+  recvLabel.textContent = "Fetching file info...";
 
   try {
-    const metaRes = await fetch(`${API_BASE}/file-info/${code}`);
-    if (!metaRes.ok) { toast('Invalid or expired code', 'error'); receiveProgress.style.display = 'none'; return; }
-    const meta = await metaRes.json();
-
-    recvLabel.textContent = `Downloading ${meta.filename}…`;
-    rfpName.textContent = meta.filename;
-    rfpSize.textContent = formatBytes(meta.size);
-    rfpIcon.textContent = getFileIcon(meta.filename);
-
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', `${API_BASE}/download/${code}`);
-    xhr.responseType = 'blob';
-
-    let startTime = Date.now();
-    let lastLoaded = 0;
-
-    xhr.addEventListener('progress', (e) => {
-      if (!e.lengthComputable) return;
-      const pct = Math.round((e.loaded / e.total) * 100);
-      const speed = (e.loaded - lastLoaded) / ((Date.now() - startTime) / 1000 || 1);
-      lastLoaded = e.loaded; startTime = Date.now();
-      recvBar.style.width = pct + '%';
-      recvPct.textContent = pct + '%';
-      recvSpeed.textContent = formatBytes(speed) + '/s';
-      recvSize.textContent = `${formatBytes(e.loaded)} / ${formatBytes(meta.size)}`;
-    });
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status === 200) {
-        const url = URL.createObjectURL(xhr.response);
-        rfpDownloadBtn.href = url;
-        rfpDownloadBtn.download = meta.filename;
-        recvFileInfo.style.display = 'flex';
-        recvBar.style.width = '100%'; recvPct.textContent = '100%';
-        recvLabel.textContent = 'Download Ready ✓';
-        toast('File ready to save!', 'success');
-        const a = document.createElement('a');
-        a.href = url; a.download = meta.filename;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => resetReceiveUI(), 800);
-      } else {
-        toast('Download failed', 'error');
-        receiveProgress.style.display = 'none';
-      }
-    });
-
-    xhr.addEventListener('error', () => {
-      toast('Network error during download', 'error');
+    // Step 1: Get file info
+    const infoRes = await fetch(FUNCTIONS_BASE + '/file-info?code=' + code);
+    if (!infoRes.ok) {
+      toast('Invalid or expired code', 'error');
       receiveProgress.style.display = 'none';
+      return;
+    }
+    const infoData = await infoRes.json();
+    if (!infoData.success) {
+      toast(infoData.error || 'Invalid or expired code', 'error');
+      receiveProgress.style.display = 'none';
+      return;
+    }
+
+    const files = infoData.files;
+    if (!files || files.length === 0) {
+      toast('No files found for this code', 'error');
+      receiveProgress.style.display = 'none';
+      return;
+    }
+
+    // Show first file info
+    const firstFile = files[0];
+    recvLabel.textContent = 'Downloading ' + firstFile.originalName + '...';
+    rfpName.textContent = firstFile.originalName;
+    rfpSize.textContent = formatBytes(firstFile.size);
+    rfpIcon.textContent = getFileIcon(firstFile.originalName);
+
+    // Step 2: Initiate download to get signed URL and encryption keys
+    const dlRes = await fetch(FUNCTIONS_BASE + '/get-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
     });
 
-    xhr.send();
+    if (!dlRes.ok) {
+      throw new Error('Download request failed');
+    }
+
+    const dlData = await dlRes.json();
+    if (!dlData.success) {
+      throw new Error(dlData.error || 'Download failed');
+    }
+
+    const downloadFiles = dlData.files || [];
+    if (downloadFiles.length === 0) {
+      throw new Error('No download files returned');
+    }
+
+    // Step 3: Download encrypted file via signed URL
+    const dlFile = downloadFiles[0];
+    recvLabel.textContent = 'Downloading encrypted file...';
+
+    const encryptedRes = await fetch(dlFile.downloadUrl);
+    if (!encryptedRes.ok) {
+      throw new Error('Failed to download encrypted file from storage');
+    }
+
+    const encryptedBlob = await encryptedRes.blob();
+    const totalBytes = encryptedBlob.size;
+
+    // Update progress
+    recvBar.style.width = '50%';
+    recvPct.textContent = '50%';
+    recvSize.textContent = formatBytes(totalBytes) + ' / ' + formatBytes(firstFile.size);
+
+    // Step 4: Decrypt in browser
+    recvLabel.textContent = 'Decrypting ' + dlFile.originalName + '...';
+    const decryptedData = await decryptFile(encryptedBlob, dlFile.encryptionKey, dlFile.encryptionIV);
+
+    recvBar.style.width = '100%';
+    recvPct.textContent = '100%';
+    recvLabel.textContent = 'Download Ready' + ' ✓';
+
+    // Step 5: Create download link and trigger
+    const decryptedBlob = new Blob([decryptedData], { type: dlFile.mimeType || 'application/octet-stream' });
+    const url = URL.createObjectURL(decryptedBlob);
+
+    rfpDownloadBtn.href = url;
+    rfpDownloadBtn.download = dlFile.originalName;
+    recvFileInfo.style.display = 'flex';
+
+    // Auto-download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = dlFile.originalName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    toast('File decrypted and saved!', 'success');
+    receiveBtn.disabled = false;
+    receiveBtn.querySelector('.btn-text').textContent = 'Download';
+    setTimeout(() => resetReceiveUI(), 1000);
 
   } catch (err) {
-    toast('Error: ' + err.message, 'error');
+    toast('❌ Download failed: ' + err.message + '. Please try again.', 'error');
+    receiveBtn.disabled = false;
+    receiveBtn.querySelector('.btn-text').textContent = 'Download';
     receiveProgress.style.display = 'none';
+    console.error('Download error:', err);
   }
 }
 
 // =============================================
-// QR SCANNER — use single rAF loop, no setTimeout
+// QR SCANNER
 // =============================================
-scanQrBtn.addEventListener('click', openScanner);
-closeScanner.addEventListener('click', stopScanner);
+if (scanQrBtn && closeScanner) {
+  scanQrBtn.addEventListener('click', openScanner);
+  closeScanner.addEventListener('click', stopScanner);
+}
 
 async function openScanner() {
   if (!navigator.mediaDevices) { toast('Camera not supported in this browser', 'error'); return; }
   try {
-    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } } });
+    qrStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+    });
     qrVideo.srcObject = qrStream;
     qrScannerCard.style.display = 'flex';
-    try { await qrVideo.play(); } catch (_) { }
+    try { await qrVideo.play(); } catch (_) {}
     toast('Point camera at a DropBeam QR code', 'info');
     scanning = true;
     requestAnimationFrame(scanFrame);
@@ -701,7 +858,6 @@ function stopScanner() {
   qrScannerCard.style.display = 'none';
 }
 
-// Reusable canvas for scanning to avoid GC pressure
 const scanCanvas = document.createElement('canvas');
 const scanCtx = scanCanvas.getContext('2d');
 
@@ -711,29 +867,25 @@ function scanFrame() {
     const vw = qrVideo.videoWidth || qrVideo.clientWidth;
     const vh = qrVideo.videoHeight || qrVideo.clientHeight;
     if (vw && vh) {
-      // Downscale for faster QR scanning
-      const scale = Math.min(1, 400 / Math.max(vw, vh));
+      const scale = Math.min(1, 320 / Math.max(vw, vh));
       scanCanvas.width = Math.floor(vw * scale);
       scanCanvas.height = Math.floor(vh * scale);
       scanCtx.drawImage(qrVideo, 0, 0, scanCanvas.width, scanCanvas.height);
       try {
         const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
         if (typeof jsQR !== 'undefined') {
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          const qrCode = jsQR(imageData.data, imageData.width, imageData.height, {
             inversionAttempts: 'dontInvert'
           });
-          if (code && code.data) {
-            handleQrResult(code.data);
+          if (qrCode && qrCode.data) {
+            handleQrResult(qrCode.data);
             return;
           }
         }
-      } catch (err) {
-        // silently ignore scan errors
-      }
+      } catch (_) {}
     }
   }
-  // Throttle to ~10fps for QR scanning to save CPU
-  setTimeout(() => { if (scanning) requestAnimationFrame(scanFrame); }, 100);
+  setTimeout(() => { if (scanning) requestAnimationFrame(scanFrame); }, 200);
 }
 
 function handleQrResult(url) {
@@ -743,11 +895,16 @@ function handleQrResult(url) {
     const code = u.searchParams.get('code');
     if (code && /^\d{6}$/.test(code)) {
       code.split('').forEach((ch, i) => {
-        codeInputs[i].value = ch; codeInputs[i].classList.add('filled');
+        if (codeInputs[i]) {
+          codeInputs[i].value = ch;
+          codeInputs[i].classList.add('filled');
+        }
       });
-      toast('QR scanned! Starting download…', 'success');
+      toast('QR scanned! Starting download...', 'success');
       setTimeout(() => {
-        try { handleReceive(); } catch (_) { document.getElementById('receive').scrollIntoView({ behavior: 'smooth' }); }
+        try { handleReceive(); } catch (_) {
+          document.getElementById('receive').scrollIntoView({ behavior: 'smooth' });
+        }
       }, 300);
     } else {
       toast('QR code not recognized as DropBeam', 'error');
@@ -771,32 +928,32 @@ document.addEventListener('click', (e) => {
 }, { passive: false });
 
 // =============================================
-// TRANSFER STATS (Live Visualizer) — longer interval
+// TRANSFER STATS (Live Visualizer)
 // =============================================
 let statsInterval = null;
 
 async function fetchStats() {
   try {
-    const res = await fetch(`${API_BASE}/api/stats`);
+    const res = await fetch(FUNCTIONS_BASE + '/stats');
     if (!res.ok) return;
     const data = await res.json();
+    if (!data.success) return;
     const elTransfers = document.getElementById('tv-transfers');
     const elData = document.getElementById('tv-data-transferred');
     const elActive = document.getElementById('tv-active');
     if (elTransfers) elTransfers.textContent = data.totalTransfers || 0;
     if (elData) elData.textContent = formatBytes(data.totalDataTransferred || 0);
     if (elActive) elActive.textContent = data.activeTransfers || 0;
-  } catch (_) { /* silently fail */ }
+  } catch (_) {}
 }
 
-// Start polling stats when the live section is visible
 const liveSection = document.getElementById('live');
 if (liveSection) {
   const liveObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         fetchStats();
-        statsInterval = setInterval(fetchStats, 6000);
+        statsInterval = setInterval(fetchStats, 10000);
       } else if (statsInterval) {
         clearInterval(statsInterval);
         statsInterval = null;
@@ -806,22 +963,51 @@ if (liveSection) {
   liveObserver.observe(liveSection);
 }
 
-// Cleanup on page unload
+window.addEventListener('pagehide', () => {
+  if (statsInterval) clearInterval(statsInterval);
+  if (expiryInterval) clearInterval(expiryInterval);
+});
 window.addEventListener('beforeunload', () => {
   if (statsInterval) clearInterval(statsInterval);
+  if (expiryInterval) clearInterval(expiryInterval);
 });
 
 // =============================================
-// SOCKET.IO (real-time notifications) — lazy connect
+// SUPABASE REALTIME - Listen for transfer updates
 // =============================================
-function tryConnectSocket() {
-  if (typeof io === 'undefined') return;
-  const socket = io(API_BASE, { transports: ['polling', 'websocket'] });
-  socket.on('file:received', (data) => {
-    if (data.code === currentCode) {
-      toast(`📥 Someone downloaded your file!`, 'success', 5000);
+let transferSubscription = null;
+
+function initSupabaseRealtime() {
+  try {
+    if (typeof supabase !== "undefined" && typeof supabaseClient === "undefined") {
+      supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     }
-  });
+    if (supabaseClient && currentCode) {
+      transferSubscription = supabaseClient
+        .channel('transfer-updates')
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'transfers',
+          filter: 'code=eq.' + currentCode
+        }, (payload) => {
+          if (payload.new && payload.new.download_count > 0) {
+            toast('📥 Someone downloaded your file!', 'success', 5000);
+          }
+        })
+        .subscribe();
+    }
+  } catch (_) {}
 }
 
-setTimeout(tryConnectSocket, 2000);
+// Init Supabase client for realtime
+(function initSupabase() {
+  try {
+    if (typeof supabase !== 'undefined') {
+      window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    }
+  } catch (_) {}
+})();
+
+// Show init message
+console.log('DropBeam loaded with Supabase backend');

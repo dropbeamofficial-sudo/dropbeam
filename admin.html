@@ -35,6 +35,7 @@
       margin-bottom: 8px; letter-spacing: -1px;
     }
     .subtitle { color: var(--text-2); font-size: 14px; margin-bottom: 24px; }
+    .subtitle code { color:var(--accent); font-family:var(--font-mono); }
     .admin-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
     input[type=text] {
       flex: 1; min-width: 180px; padding: 10px 14px;
@@ -79,7 +80,7 @@
 <body>
   <div class="card">
     <h1>◈ DropBeam — Admin</h1>
-    <p class="subtitle">Monitor active file transfers. Token is the same value as <code style="color:var(--accent);font-family:var(--font-mono)">ADMIN_TOKEN</code> on the backend.</p>
+    <p class="subtitle">Monitor active file transfers. Token is the same value as <code>ADMIN_TOKEN</code> on the backend.</p>
 
     <div class="admin-controls">
       <input id="token" type="text" placeholder="Enter admin token" />
@@ -91,9 +92,8 @@
     <div id="results"></div>
   </div>
 
-  <script src="/_env.js"></script>
   <script>
-    const API_BASE = window.__BACKEND_URL__ && window.__BACKEND_URL__.length ? window.__BACKEND_URL__ : window.location.origin;
+    const FUNCTIONS_BASE = 'https://tbngouvplswvziszlnee.supabase.co/functions/v1';
     const loadBtn = document.getElementById('load');
     const clearBtn = document.getElementById('clear');
     const tokenInput = document.getElementById('token');
@@ -107,7 +107,7 @@
       if(!token){ showStatus('Please enter the admin token', true); return; }
       showStatus('Loading...'); results.innerHTML = '';
       try{
-        const res = await fetch(API_BASE + '/admin/transfers', { headers: { 'Authorization': 'Bearer ' + token } });
+        const res = await fetch(FUNCTIONS_BASE + '/admin-transfers', { headers: { 'Authorization': 'Bearer ' + token } });
         if(!res.ok){ const text = await res.text(); showStatus('Error: ' + res.status + ' ' + text, true); return; }
         const data = await res.json();
         showStatus('Loaded ' + (data.count || 0) + ' transfers');

@@ -1114,3 +1114,44 @@ input { font-family: var(--font-body); }
     display: none;
   }
 }
+
+/* =============================================
+   90FPS PERFORMANCE OPTIMIZATIONS
+   ============================================= */
+
+/* Optimize animated elements */
+canvas, .particle-container, .hero-section {
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Use GPU compositing for all animated elements */
+.magnetic-wrapper, .btn, .toast, .progress-card, .code-card {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+/* Offscreen sections: don't render until visible */
+#live, #stats-section, footer, .features-section {
+  content-visibility: auto;
+  contain-intrinsic-size: 500px;
+}
+
+/* Prevent layout shifts */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth scroll for performance */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Reduce repaints on hover states */
+@media (hover: hover) {
+  .btn:hover, .magnetic-wrapper:hover {
+    transition: transform 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.15s ease;
+  }
+}
